@@ -28,6 +28,8 @@ private:
 
 	Bus& bus;
 
+	uint16_t currentAddress;
+
 public:
 	Cpu(Bus& b) : bus(b) {};
 
@@ -36,6 +38,24 @@ public:
 	void reset();
 	//simulate one step of CPU operation
 	void cycle();
+
+
+	// pointer to instruction function
+	using opcFunction = void (Cpu::*)();
+	using addrFunction = void (Cpu::*)();
+	using penaltyFunction = void (Cpu::*)();
+	// lookup table struct
+	struct Instruction {
+		std::string inst;
+		opcFunction addr;
+		addrFunction opc;
+		uint8_t cycles;
+		penaltyFunction penalty;
+	};
+	// create a lookup table that can hold 151 + illegal options
+	static Instruction lookup[0x100];
+	void initInstructions();
+	void execInstruction();
 
 	// given a mask (flag), perform OR with the mask to set the flag
 	// i.e N = 10000000 (0x80)
@@ -50,23 +70,33 @@ public:
 	// check the flag status by masking with P::<flag>
 	bool getFlag(P flag) { return status_reg & flag; }
 
-	uint16_t absoluteAddress(const uint8_t& index_reg);
-	uint16_t zeroPageAddress(const uint8_t& index_reg);
-	uint16_t indirectAddress();
-	uint16_t indexedIndirectAddress();
-	uint16_t indirectIndexedAddress();
-
-	uint8_t rotate(const uint8_t& value, const char& side);
-	void rotateZeroPage(const uint8_t& index_reg, const char& side);
-	void rotateAbsolute(const uint8_t& index_reg, const char& side);
-
-	void updateZN(uint8_t value);
+	void updateN(uint8_t& value);
+	void updateZ(uint8_t& value);
+	void updateV(uint8_t& value);
+	void updateC(uint8_t& value);
 
 	// reads the programcounter and automatically increments it
 	uint8_t fetchByte();
-
+	uint8_t pull();
 	void push(const uint8_t& byte);
 	void pushWord(const uint16_t& word);
-	uint8_t pull();
+
+
+	// Operation Codes
+	void ADC(), JMP(), JSR(),
+		LDA(), LDX(), LDY(), NOP(),
+		PHA(), PHP(), PLA(), PLP(),
+		ROL(), ROR(),
+		STA(), STX(), STY(),
+		TAX(), TAY(), TSX(), TXA(), TXS(), TYA();
+
+	// Address Modes
+	void acc(), abs(), absX(), absY(),
+		imm(), impl(), ind(), Xind(), indY(),
+		rel(), zpg(), zpgX(), zpgY();
+
+	// Penalty Functions
+	void crossBound(), branch(), sameBound(), np();
+
 };
 

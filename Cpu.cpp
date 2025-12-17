@@ -8,6 +8,47 @@ Cpu::Cpu(Bus& b) : bus(b)
 	
 }
 
+void  Cpu::updateN(uint8_t& value)
+{
+	if (value & 0x80) Cpu::setFlag(N); else Cpu::clearFlag(N);
+}
+void  Cpu::updateZ(uint8_t& value)
+{
+	if (value == 0) Cpu::setFlag(Z); else Cpu::clearFlag(Z);
+}
+void  Cpu::updateC(uint8_t& value)
+{
+	if (value > 0xFF) setFlag(C); else clearFlag(C);
+}
+void  Cpu::updateV(uint8_t& value)
+{
+	// fix logic
+	if (value) setFlag(V); else clearFlag(V);
+}
+
+uint8_t Cpu::fetchByte()
+{
+	const uint8_t fetch = bus.read(PC);
+	PC++;
+	return fetch;
+}
+uint8_t Cpu::pull()
+{
+	S++;
+	return bus.read(0x100 + S);
+}
+void Cpu::push(const uint8_t& byte)
+{
+	bus.write(byte, 0x100 + S);
+	S--;
+}
+void Cpu::pushWord(const uint16_t& word)
+{
+	push(uint8_t((word & 0xFF00) >> 8));
+	push(uint8_t(word));
+}
+
+
 void Cpu::reset()
 {
 	// reset all registers
@@ -36,477 +77,29 @@ void Cpu::cycle()
 	// increment for next instruction
 	PC++;
 	uint16_t address;
-	// DECODE stage opcodes:
-	// https://www.masswerk.at/6502/6502_instruction_set.html#modes
 
-
-	// IMPLEMENT A LOOKUP TABLE **REVISE
-	switch(opcode)
-	{ 
-
-	// NOP
-	case 0xEA:
-		cycleCounter += 2;
-		break;
-	// JMP absolute 
-	case 0x4C:
-		PC = absoluteAddress(0x0);
-		cycleCounter += 3;
-		break;
-	// JMP indirect 
-	case 0x6C:
-		PC = indirectAddress();
-		break;
-	// JSR absolute 
-	case 0x20:
-		uint16_t origPC = PC;
-		PC = absoluteAddress(0x0);
-		pushWord(origPC -1);
-		cycleCounter += 3;
-		break;
-
-
-	// ADC immediate ** TO REVISE
-	case 0x69:
-		uint8_t addend = fetchByte();
-		uint16_t sum = A + addend + getFlag(C);
-		
-		if (sum > 0xFF) setFlag(C); else clearFlag(C);
-		
-		updateZN(A);
-		
-		bool overflow = (~(uint16_t(A) ^ addend) & (uint16_t(A) ^ sum)) & 0x0080;
-		if (overflow) setFlag(V); else clearFlag(V);
-
-		A = sum & 0xFF;
-		break;
-		
-	// LDA immediate 
-	case 0xA9:
-		A = fetchByte();
-		updateZN(A);
-		cycleCounter += 2;
-		break;
-	// LDA zeropage 
-	case 0xA5:
-		A = bus.read(zeroPageAddress(0x0));
-		updateZN(A);
-		cycleCounter += 3;
-		break;
-	// LDA zeropage,X
-	case 0xB5:
-		A = bus.read(zeroPageAddress(X));
-		updateZN(A);
-		cycleCounter += 4;
-		break;
-	// LDA absolute
-	case 0xAD:
-		A = bus.read(absoluteAddress(0x0));
-		updateZN(A);
-		cycleCounter += 4;
-		break;
-	// LDA absolute,X
-	case 0xBD:
-		A = bus.read(absoluteAddress(X));
-		updateZN(A);
-		cycleCounter += 4; // **add penalty
-		break;
-	// LDA absolute,Y
-	case 0xB9:
-		A = bus.read(absoluteAddress(Y));
-		cycleCounter += 4; // **add penalty
-		break;
-	// LDA (indirect,X) - preIndexed
-	case 0xA1:
-		A = indexedIndirectAddress();
-		updateZN(A);
-		cycleCounter += 6;
-		break;
-	// LDA (indirect), Y - postIndexed
-	case 0xB1:
-		A = indirectIndexedAddress();
-		updateZN(A);
-		cycleCounter += 5; // **add penalty
-		break;
-
-	// LDX immediate 
-	case 0xA2:
-		X = fetchByte();
-		updateZN(X);
-		cycleCounter += 2;
-		break;
-	// LDX zeropage 
-	case 0xA6:
-		X = bus.read(zeroPageAddress(0x0));
-		updateZN(X);
-		cycleCounter += 3;
-		break;
-	// LDX zeropage,Y
-	case 0xB6:
-		X = bus.read(zeroPageAddress(Y));
-		updateZN(X);
-		cycleCounter += 4;
-		break;
-	// LDX absolute
-	case 0xAE:
-		X = bus.read(absoluteAddress(0x0));
-		updateZN(X);
-		cycleCounter += 4;
-		break;
-	// LDX absolute,Y
-	case 0xBE:
-		X = bus.read(absoluteAddress(Y));
-		updateZN(X);  // **add penalty
-		cycleCounter += 4;
-		break;
-
-
-	// LDY immediate 
-	case 0xA0:
-		Y = fetchByte();
-		updateZN(Y);
-		cycleCounter += 2;
-		break;
-	// LDY zeropage 
-	case 0xA4:
-		Y = bus.read(zeroPageAddress(0x0));
-		updateZN(Y);
-		cycleCounter += 3;
-		break;
-	// LDY zeropage,X
-	case 0xB4:
-		Y = bus.read(zeroPageAddress(X));
-		updateZN(Y);
-		cycleCounter += 4;
-		break;
-	// LDY absolute
-	case 0xAC:
-		Y = bus.read(absoluteAddress(0x0));
-		updateZN(Y);
-		cycleCounter += 4;
-		break;
-	// LDY absolute,X
-	case 0xBC:
-		Y = bus.read(absoluteAddress(X));
-		updateZN(Y);  // **add penalty
-		cycleCounter += 4;
-		break;
-
-	// STA zeropage 
-	case 0x85:
-		bus.write(A, zeroPageAddress(0x0));
-		cycleCounter += 3;
-		break;
-	// STA zeropage,X
-	case 0x95:
-		bus.write(A, zeroPageAddress(X));
-		cycleCounter += 4;
-		break;
-	// STA absolute
-	case 0x8D:
-		bus.write(A, absoluteAddress(0x0) );
-		cycleCounter += 4;
-		break;
-	// STA absolute,X
-	case 0x9D:
-		bus.write(A, absoluteAddress(X));
-		cycleCounter += 5;
-		break;
-	// STA absolute,Y
-	case 0x99:
-		bus.write(A, absoluteAddress(Y));
-		cycleCounter += 5;
-		break;
-	// STA (indirect,X) - preIndexed
-	case 0x81:
-		bus.write(A, indexedIndirectAddress());
-		cycleCounter += 6;
-		break;
-	// STA (indirect), Y - postIndexed
-	case 0x91:
-		bus.write(A, indirectIndexedAddress());
-		cycleCounter += 6;
-		break;
-
-	// STX zeropage 
-	case 0x86:
-		bus.write(X, zeroPageAddress(0x0));
-		cycleCounter += 3;
-		break;
-	// STX zeropage,Y
-	case 0x96:
-		bus.write(X, zeroPageAddress(Y));
-		cycleCounter += 4;
-		break;
-	// STX absolute
-	case 0x8E:
-		bus.write(X, absoluteAddress(0x0));
-		cycleCounter += 4;
-		break;
-
-	//  STY zeropage 
-	case 0x8C:
-		bus.write(Y, zeroPageAddress(0x0));
-		cycleCounter += 3;
-		break;
-	// STY zeropage,X
-	case 0x84:
-		bus.write(Y, zeroPageAddress(X));
-		cycleCounter += 4;
-		break;
-	// STY absolute
-	case 0x94:
-		bus.write(Y, absoluteAddress(0x0));
-		cycleCounter += 4;
-		break;
-	
-	// TAX
-	case 0xAA:
-		X = A;
-		updateZN(X);
-		break;
-	// TAY
-	case 0xA8:
-		Y = A;
-		updateZN(Y);
-		break;
-	// TXA
-	case 0x8A:
-		A = X;
-		updateZN(A);
-		break;
-	// TYA
-	case 0x98:
-		A = Y;
-		updateZN(A);
-		break;
-	// TXS
-	case 0x9A:
-		X = S;
-		break;
-	// TSX
-	case 0xBA:
-		S = X;
-		break;
-
-	// PHA
-	case 0x48:
-		push(A);
-		cycleCounter += 3;
-		break;
-	// PHP - The status register will be pushed with the break flag and bit 5 set to 1
-	case 0x08:
-		push(status_reg | 0x20 | 0x10);
-		cycleCounter += 3;
-		break;
-	// PLA
-	case 0x68:
-		A = pull();
-		updateZN(A);
-		cycleCounter += 4;
-		break;
-	// PLP - The status register will be pulled with the break flag and bit 5 ignored
-	case 0x28:
-		status_reg = pull() | (status_reg & 0x20) | (status_reg & 0x10);
-		cycleCounter += 4;
-		break;
-
-
-	// ROL A
-	case 0x2A:
-		A = rotate(A, 'l');
-		cycleCounter += 2;
-		break;
-	// ROL zeropage
-	case 0x26:
-		address = zeroPageAddress(0x0);
-		bus.write( 
-			Cpu::rotate(bus.read(address), 'l'), 
-			address
-		);
-		cycleCounter += 5;
-		break;
-	// ROL zeropage, X
-	case 0x36:
-		address = zeroPageAddress(X);
-		bus.write(
-			Cpu::rotate(bus.read(address), 'l'),
-			address
-		);
-		cycleCounter += 6;
-		break;
-	// ROL absolute 
-	case 0x2E:
-		address = absoluteAddress(0x0);
-		bus.write(
-			Cpu::rotate(bus.read(address), 'l'),
-			address
-		);
-		cycleCounter += 6;
-		break;
-	// ROL absolute, X
-	case 0x3E:
-		address = absoluteAddress(X);
-		bus.write(
-			Cpu::rotate(bus.read(address), 'l'),
-			address
-		);
-		cycleCounter += 7;
-		break;
-
-	// ROR A
-	case 0x6A:
-		A = rotate(A, 'r');
-		cycleCounter += 2;
-		break;
-	// ROR zeropage
-	case 0x66:
-		address = zeroPageAddress(0x0);
-		bus.write(
-			Cpu::rotate(bus.read(address), 'r'),
-			address
-		);
-		cycleCounter += 5;
-		break;
-	// ROR zeropage, X
-	case 0x76:
-		address = zeroPageAddress(X);
-		bus.write(
-			Cpu::rotate(bus.read(address), 'r'),
-			address
-		);
-		cycleCounter += 6;
-		break;
-	// ROR absolute 
-	case 0x6E:
-		address = absoluteAddress(0x0);
-		bus.write(
-			Cpu::rotate(bus.read(address), 'r'),
-			address
-		);
-		cycleCounter += 6;
-		break;
-	// ROR absolute, X
-	case 0x7E:
-		address = absoluteAddress(X);
-		bus.write(
-			Cpu::rotate(bus.read(address), 'r'),
-			address
-		);
-		cycleCounter += 7;
-		break;
-
-	default:
-		break;
-	}
+	// EXEC INSTRUCTION
 
 }
 	
-uint8_t Cpu::rotate(const uint8_t& value, const char& side)
-{	
-	uint8_t rot_value;
-	if(side == 'l') { 
-		rot_value = (value << 1) | uint8_t(Cpu::getFlag(C));
-		// set C if MSB is 1, otherwise clear C
-		if (value & 0x80) Cpu::setFlag(C);
-		else Cpu::clearFlag(C);
-	}
-	else if (side == 'r') { 
-		rot_value = (value >> 1) | uint8_t(Cpu::getFlag(C) << 7);
-		// set C if LSB is 1, otherwise clear C
-		if (value & 0x01) Cpu::setFlag(C);
-		else Cpu::clearFlag(C);
-	}
 
-	if (rot_value == 0) setFlag(Z); else clearFlag(Z);
-	if (rot_value & 0x80) setFlag(N); else clearFlag(N);
-
-	return rot_value;
-}
-
-
-void Cpu::rotateZeroPage(
-	const uint8_t& index_reg,
-	const char& side)
+// Address Modes
+void Cpu::acc() 
 {
-	uint8_t zero_page_address = fetchByte() + index_reg;
-	bus.write(Cpu::rotate(bus.read(zero_page_address), side), zero_page_address);
-
-	cycleCounter += 5;
+	currentAddress = A;
 }
-
-
-void Cpu::rotateAbsolute(
-	const uint8_t& index_reg,
-	const char& side)
-{
-	uint16_t address = absoluteAddress(index_reg);
-	
-	uint8_t data = bus.read(address);
-	uint8_t result = rotate(data, side);
-	bus.write(result, address);
-
-	cycleCounter += 6;
-
-}
-
-
-uint16_t Cpu::absoluteAddress(const uint8_t& index_reg)
+void Cpu::abs()
 {
 	uint8_t ll = fetchByte();
 	uint8_t hh = fetchByte();
 	// shift high_byte and OR low_byte with it
-	uint16_t address = ((hh << 8) | ll);
-	uint16_t final_address = address + index_reg;
-
-	// If the high byte changed, we crossed a page boundary
-	if ((address & 0xFF00) != (final_address & 0xFF00)) {
-		cycleCounter++;
-	}
-
-	return final_address;
+	currentAddress = ((hh << 8) | ll);
 }
-
-
-uint16_t Cpu::zeroPageAddress(const uint8_t& index_reg)
-{
-	// from $00 to $FF. the leading bits are always 00
-	// it can only therefore address 2^8=256-bits of mem
-	// advantage: read 8 bits instead of 16 to get 8 bits value, one less cycle
-	// get the page position
-	uint8_t zero_page_address = fetchByte() + index_reg;
-	return zero_page_address;
-}
-
-
-
-uint16_t Cpu::indexedIndirectAddress()
-{
-	uint16_t pointer = (fetchByte() + X) & 0xFF;
-	uint8_t	ll = bus.read(pointer);
-	uint8_t hh = bus.read((pointer + 1) & 0xFF);
-
-	return  (hh << 8) | ll;
-}
-
-
-uint16_t Cpu::indirectIndexedAddress()
-{ 
-	uint8_t zeroPageAddress = fetchByte();
-	uint8_t ll = bus.read(zeroPageAddress);
-	uint8_t hh = bus.read((zeroPageAddress+1) & 0xFF);
-	uint16_t indirectAddress = ((uint16_t)hh << 8) | ll;
-	uint16_t effectiveAddress = indirectAddress + Y;
-
-	// Check for page boundary crossing 
-	if ((indirectAddress & 0xFF00) != (effectiveAddress & 0xFF00)) {
-		cycleCounter++;
-	}
-	return indirectAddress + Y;
-}
-
-
-uint16_t Cpu::indirectAddress()
+void Cpu::absX() { abs(); currentAddress += X; };
+void Cpu::absY() { abs(); currentAddress += Y; };
+void Cpu::imm() { currentAddress = fetchByte(); };
+void Cpu::impl() {};
+void Cpu::ind()
 {
 	uint8_t ll = fetchByte();
 	uint8_t hh = fetchByte();
@@ -518,45 +111,505 @@ uint16_t Cpu::indirectAddress()
 	uint8_t indirect_ll = bus.read(indirectAddress);
 	// this is to address the JUMP indirect error bug where 
 	// when the high-hendian is a page boundary i.e. $00FF
-	uint8_t indirect_hh = bus.read( 
-		(indirectAddress & 0xFF00) | 
+	uint8_t indirect_hh = bus.read(
+		(indirectAddress & 0xFF00) |
 		((indirectAddress + 1) & 0x00FF)
 	);
 
-	return ((uint16_t)indirect_hh << 8) | indirect_ll;
+	currentAddress = ((uint16_t)indirect_hh << 8) | indirect_ll;
 
 }
-
-uint8_t Cpu::pull()
+void Cpu::Xind()
 {
-	S++;
-	return bus.read(0x100 + S);
-}
+	uint16_t pointer = (fetchByte() + X) & 0xFF;
+	uint8_t	ll = bus.read(pointer);
+	uint8_t hh = bus.read((pointer + 1) & 0xFF);
 
-void Cpu::push(const uint8_t& byte)
+	currentAddress = (hh << 8) | ll;
+}
+void Cpu::indY()
+{ 
+	uint8_t zeroPageAddress = fetchByte();
+	uint8_t ll = bus.read(zeroPageAddress);
+	uint8_t hh = bus.read((zeroPageAddress+1) & 0xFF);
+	uint16_t indirectAddress = ((uint16_t)hh << 8) | ll;
+	uint16_t effectiveAddress = indirectAddress + Y;
+
+	// Check for page boundary crossing 
+	if ((indirectAddress & 0xFF00) != (effectiveAddress & 0xFF00)) {
+		cycleCounter++;
+	}
+	currentAddress = indirectAddress + Y;
+}
+void Cpu::zpg()
 {
-	bus.write(byte, 0x100 + S);
-	S--;
+	// from $00 to $FF. the leading bits are always 00
+	// it can only therefore address 2^8=256-bits of mem
+	// advantage: read 8 bits instead of 16 to get 8 bits value, one less cycle
+	// get the page position
+	currentAddress = fetchByte();
 }
+void Cpu::zpgX() { Cpu::zpg(); currentAddress += X; };
+void Cpu::zpgY() { Cpu::zpg(); currentAddress += Y; };
 
- 
-void Cpu::pushWord(const uint16_t& word)
+
+// Operation Codes
+void Cpu::ADC()
 {
-	push(uint8_t((word & 0xFF00) >> 8));
-	push(uint8_t(word));
+	uint8_t addend = bus.read(currentAddress);
+	uint16_t sum = A + addend + getFlag(C);
+	A = sum & 0xFF;
+	updateN(A);
+	updateZ(A);
+	updateC(A);
+	updateV(A);
 }
-
-
-void Cpu::updateZN(uint8_t value)
+void Cpu::JMP() { PC = bus.read(currentAddress); }
+void Cpu::JSR()
 {
-	if (value == 0) Cpu::setFlag(Z); else Cpu::clearFlag(Z);
-	if (value & 0x80) Cpu::setFlag(N); else Cpu::clearFlag(N);
+	uint16_t origPC = PC;
+	PC = bus.read(currentAddress);
+	pushWord(origPC - 1);
 }
-
-
-uint8_t Cpu::fetchByte()
+void Cpu::LDA()
 {
-	const uint8_t fetch = bus.read(PC);
-	PC++;
-	return fetch;
+	A = bus.read(currentAddress);
+	Cpu::updateN(A);
+	Cpu::updateZ(A);
+}	
+void Cpu::LDX()
+{
+	X = bus.read(currentAddress);
+	Cpu::updateN(A);
+	Cpu::updateZ(A);
 }
+void Cpu::LDY()
+{
+	Y = bus.read(currentAddress);
+	Cpu::updateN(A);
+	Cpu::updateZ(A);
+}
+void Cpu::NOP() {}
+void Cpu::PHA() { push(A); }
+void Cpu::PHP() { push(status_reg | 0x20 | 0x10); }
+void Cpu::PLA() 
+{ 
+	A = pull(); 
+	updateN(A);
+	updateZ(A);
+}
+void Cpu::PLP() 
+{ 
+	status_reg = pull() | (status_reg & 0x20) | (status_reg & 0x10); 
+}
+void Cpu::ROL()
+{
+	uint8_t value = bus.read(currentAddress);
+	bus.write(currentAddress,
+		(value << 1) | uint8_t(Cpu::getFlag(C))
+	);
+	updateN(value);
+	updateZ(value);
+	updateC(value);
+}
+void Cpu::ROR()
+{
+	uint8_t value = bus.read(currentAddress);
+	bus.write(currentAddress,
+		(value >> 1) | uint8_t(Cpu::getFlag(C) << 7)
+	);
+	updateN(value);
+	updateZ(value);
+	updateC(value);
+}
+void Cpu::STA() { bus.write(A, currentAddress); }
+void Cpu::STX() { bus.write(X, currentAddress); }
+void Cpu::STY() { bus.write(Y, currentAddress); }
+void Cpu::TAX()
+{
+	X = A;
+	Cpu::updateN(X);
+	Cpu::updateZ(X);
+}
+void Cpu::TAY()
+{
+	Y = A;
+	Cpu::updateN(Y);
+	Cpu::updateZ(Y);
+}
+void Cpu::TSX() { S = X; }
+void Cpu::TXA()
+{
+	A = X;
+	Cpu::updateN(A);
+	Cpu::updateZ(A);
+}
+void Cpu::TXS() { X = S; }
+void Cpu::TYA()
+{
+	A = Y;
+	Cpu::updateN(A);
+	Cpu::updateZ(A);
+}
+
+
+// Penalty Functions
+void Cpu::crossBound() 
+{
+	/*
+	// If the high byte changed, we crossed a page boundary
+	if ((address & 0xFF00) != (final_address & 0xFF00)) {
+		cycleCounter++;
+	}
+	*/
+};
+void Cpu::branch() {};
+void Cpu::sameBound() {};
+void Cpu::np() {};
+
+
+void Cpu::initInstructions()
+{
+	// https://www.masswerk.at/6502/6502_instruction_set.html#modes
+	//     hex      memonic	  addressing    opc	 cycles  penalty
+	/* -------------------------------------------------
+	ADC
+		Add Memory to Accumulator with Carry
+
+		A + M + C->A, C
+		N	Z	C	I	D	V
+		+ ++--+
+		addressing		assembler		opc	bytes	cycles
+		immediate		ADC #oper		69	2		2
+		zeropage		ADC oper		65	2		3
+		zeropage, X		ADC oper, X		75	2		4
+		absolute		ADC oper		6D	3		4
+		absolute, X		ADC oper, X		7D	3		4 *
+		absolute, Y		ADC oper, Y		79	3		4 *
+		(indirect, X)	ADC(oper, X)	61	2		6
+		(indirect), Y	ADC(oper), Y	71	2		5 *
+	*/
+	lookup[0x69] = { "ADC",  &Cpu::imm,  &Cpu::ADC, 2, &Cpu::np };
+	lookup[0x65] = { "ADC",  &Cpu::zpg,  &Cpu::ADC, 3, &Cpu::np };
+	lookup[0x75] = { "ADC",  &Cpu::zpgX, &Cpu::ADC, 4, &Cpu::np };
+	lookup[0x6D] = { "ADC",  &Cpu::abs,  &Cpu::ADC, 4, &Cpu::np };
+	lookup[0x7D] = { "ADC",  &Cpu::absX, &Cpu::ADC, 4, &Cpu::crossBound };
+	lookup[0x79] = { "ADC",  &Cpu::absY, &Cpu::ADC, 4, &Cpu::crossBound };
+	lookup[0x61] = { "ADC",  &Cpu::Xind, &Cpu::ADC, 6, &Cpu::np };
+	lookup[0x71] = { "ADC",  &Cpu::indY, &Cpu::ADC, 5, &Cpu::crossBound };
+	/* -------------------------------------------------
+	JMP
+		Jump to New Location
+
+		operand 1st byte->PCL
+		operand 2nd byte->PCH
+		N	Z	C	I	D	V
+		- -----
+		addressing	assembler	opc	bytes	cycles
+		absolute	JMP oper	4C	3		3
+		indirect	JMP(oper)	6C	3		5 * **
+	*/
+	lookup[0x4C] = { "JMP",  &Cpu::abs,  &Cpu::JMP, 3, &Cpu::np };
+	lookup[0x6C] = { "JMP",  &Cpu::ind,  &Cpu::JMP, 5, &Cpu::sameBound };
+	/* -------------------------------------------------
+	JSR
+		Jump to New Location Saving Return Address
+
+		push(PC + 2),
+		operand 1st byte->PCL
+		operand 2nd byte->PCH
+		N	Z	C	I	D	V
+		- -----
+		addressing	assembler	opc	bytes	cycles
+		absolute	JSR oper	20	3		6
+
+	*/
+	lookup[0x20] = { "JSR",  &Cpu::abs,  &Cpu::JSR, 6, &Cpu::np };
+	/* -------------------------------------------------
+	LDA
+		Load Accumulator with Memory
+
+		M->A
+		N	Z	C	I	D	V
+		+ +----
+		addressing		assembler			opc	bytes	cycles
+		immediate		LDA #oper			A9	2		2
+		zeropage		LDA oper			A5	2		3
+		zeropage, X		LDA oper, X			B5	2		4
+		absolute		LDA oper			AD	3		4
+		absolute, X		LDA oper, X			BD	3		4 *
+		absolute, Y		LDA oper, Y			B9	3		4 *
+		(indirect, X)	LDA(oper, X)		A1	2		6
+		(indirect), Y	LDA(oper), Y		B1	2		5 *
+	*/
+	lookup[0xA9] = { "LDA",  &Cpu::imm,  &Cpu::LDA, 2, &Cpu::np };
+	lookup[0xA5] = { "LDA",  &Cpu::zpg,  &Cpu::LDA, 3, &Cpu::np };
+	lookup[0xB5] = { "LDA",  &Cpu::zpgX, &Cpu::LDA, 4, &Cpu::np };
+	lookup[0xAD] = { "LDA",  &Cpu::abs,  &Cpu::LDA, 4, &Cpu::np };
+	lookup[0xBD] = { "LDA",  &Cpu::absX, &Cpu::LDA, 4, &Cpu::crossBound };
+	lookup[0xB9] = { "LDA",  &Cpu::absY, &Cpu::LDA, 4, &Cpu::crossBound };
+	lookup[0xA1] = { "LDA",  &Cpu::Xind, &Cpu::LDA, 6, &Cpu::np };
+	lookup[0xB1] = { "LDA",  &Cpu::indY, &Cpu::LDA, 5, &Cpu::crossBound };
+	/* -------------------------------------------------
+	LDX
+		Load Index X with Memory
+
+		M->X
+		N	Z	C	I	D	V
+		+ +----
+		addressing	assembler	opc	bytes	cycles
+		immediate	LDX #oper	A2	2		2
+		zeropage	LDX oper	A6	2		3
+		zeropage, Y	LDX oper, Y	B6	2		4
+		absolute	LDX oper	AE	3		4
+		absolute, Y	LDX oper, Y	BE	3		4 *
+	*/
+	lookup[0xA2] = { "LDX",  &Cpu::imm,  &Cpu::LDX, 2, &Cpu::np };
+	lookup[0xA6] = { "LDX",  &Cpu::zpg,  &Cpu::LDX, 3, &Cpu::np };
+	lookup[0xB6] = { "LDX",  &Cpu::zpgY, &Cpu::LDX, 4, &Cpu::np };
+	lookup[0xAE] = { "LDX",  &Cpu::abs,  &Cpu::LDX, 4, &Cpu::np };
+	lookup[0xBE] = { "LDX",  &Cpu::absY, &Cpu::LDX, 4, &Cpu::crossBound };
+	/* -------------------------------------------------
+		LDY
+		Load Index Y with Memory
+
+		M->Y
+		N	Z	C	I	D	V
+		+ +----
+		addressing	assembler	opc	bytes	cycles
+		immediate	LDY #oper	A0	2		2
+		zeropage	LDY oper	A4	2		3
+		zeropage, X	LDY oper, X	B4	2		4
+		absolute	LDY oper	AC	3		4
+		absolute, X	LDY oper, X	BC	3		4 *
+	*/
+	lookup[0xA0] = { "LDY",  &Cpu::imm,  &Cpu::LDY, 2, &Cpu::np };
+	lookup[0xA4] = { "LDY",  &Cpu::zpg,  &Cpu::LDY, 3, &Cpu::np };
+	lookup[0xB4] = { "LDY",  &Cpu::zpgX, &Cpu::LDY, 4, &Cpu::np };
+	lookup[0xAC] = { "LDY",  &Cpu::abs,  &Cpu::LDY, 4, &Cpu::np };
+	lookup[0xBC] = { "LDY",  &Cpu::absX, &Cpu::LDY, 4, &Cpu::crossBound };
+	/* -------------------------------------------------
+	NOP
+		No Operation
+
+		-- -
+		N	Z	C	I	D	V
+		- -----
+		addressing	assembler	opc		bytes	cycles
+		implied		NOP			EA		1		2
+	*/
+	lookup[0xEA] = { "NOP",  &Cpu::impl, &Cpu::NOP, 2, &Cpu::np };
+	/* -------------------------------------------------
+	PHA
+		Push Accumulator on Stack
+
+		push A
+		N	Z	C	I	D	V
+		- -----
+		addressing	assembler	opc	bytes	cycles
+		implied		PHA			48	1		3
+	*/
+	lookup[0x48] = { "PHA",  &Cpu::impl, &Cpu::PHA, 3, &Cpu::np };
+	/* -------------------------------------------------
+	PHP
+		Push Processor Status on Stack
+
+		The status register will be pushed with the break
+		flag and bit 5 set to 1.
+
+		push SR
+		N	Z	C	I	D	V
+		- -----
+		addressing	assembler	opc	bytes	cycles
+		implied		PHP			08	1		3
+	*/
+	lookup[0x08] = { "PHP",  &Cpu::impl, &Cpu::PHP, 3, &Cpu::np };
+	/* -------------------------------------------------
+	PLA
+		Pull Accumulator from Stack
+
+		pull A
+		N	Z	C	I	D	V
+		+ +----
+		addressing	assembler	opc	bytes	cycles
+		implied		PLA			68	1		4
+	*/
+	lookup[0x68] = { "PLA",  &Cpu::impl, &Cpu::PLA, 4, &Cpu::np };
+	/* -------------------------------------------------
+	PLP
+		Pull Processor Status from Stack
+
+		The status register will be pulled with the break
+		flag and bit 5 ignored.
+
+		pull SR
+		N	Z	C	I	D	V
+		from stack
+		addressing	assembler	opc	bytes	cycles
+		implied		PLP			28	1		4
+	*/
+	lookup[0x28] = { "PLP",  &Cpu::impl, &Cpu::PLP, 4, &Cpu::np };
+	/* -------------------------------------------------
+	ROL
+		Rotate One Bit Left(Memory or Accumulator)
+
+		C < -[76543210] < -C
+		N	Z	C	I	D	V
+		+ ++---
+		addressing	assembler	opc	bytes	cycles
+		accumulator	ROL A		2A	1		2
+		zeropage	ROL oper	26	2		5
+		zeropage, X	ROL oper, X	36	2		6
+		absolute	ROL oper	2E	3		6
+		absolute, X	ROL oper, X	3E	3		7
+	*/
+	lookup[0x2A] = { "ROL",  &Cpu::acc,  &Cpu::ROL, 2, &Cpu::np };
+	lookup[0x26] = { "ROL",  &Cpu::zpg,  &Cpu::ROL, 5, &Cpu::np };
+	lookup[0x36] = { "ROL",  &Cpu::zpgX, &Cpu::ROL, 6, &Cpu::np };
+	lookup[0x2E] = { "ROL",  &Cpu::abs,  &Cpu::ROL, 6, &Cpu::np };
+	lookup[0x3E] = { "ROL",  &Cpu::absX, &Cpu::ROL, 7, &Cpu::np };
+	/* -------------------------------------------------
+	ROR
+		Rotate One Bit Right(Memory or Accumulator)
+
+		C ->[76543210]->C
+		N	Z	C	I	D	V
+		+ ++---
+		addressing	assembler	opc	bytes	cycles
+		accumulator	ROR A		6A	1		2
+		zeropage	ROR oper	66	2		5
+		zeropage, X	ROR oper, X	76	2		6
+		absolute	ROR oper	6E	3		6
+		absolute, X	ROR oper, X	7E	3		7
+	*/
+	lookup[0x6A] = { "ROR",  &Cpu::acc,  &Cpu::ROR, 2, &Cpu::np };
+	lookup[0x66] = { "ROR",  &Cpu::zpg,  &Cpu::ROR, 5, &Cpu::np };
+	lookup[0x76] = { "ROR",  &Cpu::zpgX, &Cpu::ROR, 6, &Cpu::np };
+	lookup[0x6E] = { "ROR",  &Cpu::abs,  &Cpu::ROR, 6, &Cpu::np };
+	lookup[0x7E] = { "ROR",  &Cpu::absX, &Cpu::ROR, 7, &Cpu::np };
+	/* -------------------------------------------------
+	STA
+		Store Accumulator in Memory
+
+		A->M
+		N	Z	C	I	D	V
+		- -----
+		addressing		assembler		opc	 bytes	cycles
+		zeropage		STA oper		85	 2		3
+		zeropage, X		STA oper, X		95	 2		4
+		absolute		STA oper		8D	 3		4
+		absolute, X		STA oper, X		9D	 3		5
+		absolute, Y		STA oper, Y		99	 3		5
+		(indirect, X)	STA(oper, X)	81	 2		6
+		(indirect), Y	STA(oper), Y	91	 2		6
+	*/
+	lookup[0x85] = { "STA",  &Cpu::zpg,  &Cpu::STA, 3, &Cpu::np };
+	lookup[0x95] = { "STA",  &Cpu::zpgX, &Cpu::STA, 4, &Cpu::np };
+	lookup[0x8D] = { "STA",  &Cpu::abs,  &Cpu::STA, 4, &Cpu::np };
+	lookup[0x9D] = { "STA",  &Cpu::absX, &Cpu::STA, 5, &Cpu::np };
+	lookup[0x99] = { "STA",  &Cpu::absY, &Cpu::STA, 5, &Cpu::np };
+	lookup[0x81] = { "STA",  &Cpu::Xind, &Cpu::STA, 6, &Cpu::np };
+	lookup[0x91] = { "STA",  &Cpu::indY, &Cpu::STA, 6, &Cpu::np };
+	/* -------------------------------------------------
+	STX
+		Store Index X in Memory
+
+		X->M
+		N	Z	C	I	D	V
+		- -----
+		addressing	assembler	opc	bytes	cycles
+		zeropage	STX oper	86	2		3
+		zeropage, Y	STX oper, Y	96	2		4
+		absolute	STX oper	8E	3		4
+	*/
+	lookup[0x86] = { "STX",  &Cpu::zpg,  &Cpu::LDX, 3, &Cpu::np };
+	lookup[0x96] = { "STX",  &Cpu::zpgY, &Cpu::LDX, 4, &Cpu::np };
+	lookup[0x8E] = { "STX",  &Cpu::abs,  &Cpu::LDX, 4, &Cpu::np };
+	/* -------------------------------------------------
+	STY
+		Sore Index Y in Memory
+
+		Y->M
+		N	Z	C	I	D	V
+		- -----
+		addressing	assembler	opc	bytes	cycles
+		zeropage	STY oper	84	2	3
+		zeropage, X	STY oper, X	94	2	4
+		absolute	STY oper	8C	3	4
+	*/
+	lookup[0x84] = { "STY",  &Cpu::zpg,  &Cpu::LDX, 3, &Cpu::np };
+	lookup[0x94] = { "STY",  &Cpu::zpgX, &Cpu::LDX, 4, &Cpu::np };
+	lookup[0x8C] = { "STY",  &Cpu::abs,  &Cpu::LDX, 4, &Cpu::np };
+	/* -------------------------------------------------
+	TAX
+		Transfer Accumulator to Index X
+
+		A->X
+		N	Z	C	I	D	V
+		+ +----
+		addressing	assembler	opc	bytes	cycles
+		implied		TAX			AA	1		2
+	*/
+	lookup[0xAA] = { "TAX",  &Cpu::impl, &Cpu::TAX, 2, &Cpu::np };
+	/* -------------------------------------------------
+	TAY
+		Transfer Accumulator to Index Y
+
+		A->Y
+		N	Z	C	I	D	V
+		+ +----
+		addressing	assembler	opc	bytes	cycles
+		implied		TAY			A8	1		2
+	*/
+	lookup[0xA8] = { "TAY",  &Cpu::impl, &Cpu::TAY, 2, &Cpu::np };
+	/* -------------------------------------------------
+	TSX
+		Transfer Stack Pointer to Index X
+
+		SP->X
+		N	Z	C	I	D	V
+		+ +----
+		addressing	assembler	opc	bytes	cycles
+		implied		TSX			BA	1		2
+	*/
+	lookup[0x8C] = { "TSX",  &Cpu::impl, &Cpu::TSX, 2, &Cpu::np };
+	/* -------------------------------------------------
+	TXA
+		Transfer Index X to Accumulator
+
+		X->A
+		N	Z	C	I	D	V
+		+ +----
+		addressing	assembler	opc	bytes	cycles
+		implied		TXA			8A	1		2
+	*/
+	lookup[0x8A] = { "TXA",  &Cpu::impl, &Cpu::TXA, 2, &Cpu::np };
+	/* -------------------------------------------------
+	TXS
+		Transfer Index X to Stack Register
+
+		X->SP
+		N	Z	C	I	D	V
+		- -----
+		addressing	assembler	opc	bytes	cycles
+		implied		TXS			9A	1		2
+	*/
+	lookup[0x9A] = { "TXS",  &Cpu::impl, &Cpu::TXS, 2, &Cpu::np };
+	/* -------------------------------------------------
+	TYA
+		Transfer Index Y to Accumulator
+
+		Y->A
+		N	Z	C	I	D	V
+		+ +----
+		addressing	assembler	opc	bytes	cycles
+		implied		TYA			98	1		2
+	*/
+	lookup[0x98] = { "TYA",  &Cpu::impl, &Cpu::TYA, 2, &Cpu::np };
+}
+
+
+void Cpu::execInstruction()
+{
+
+};

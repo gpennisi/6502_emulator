@@ -30,6 +30,8 @@ private:
 
 	uint16_t currentAddress;
 
+	bool isAccumulatorMode = false;
+
 public:
 	Cpu(Bus& b) : bus(b) {};
 
@@ -47,15 +49,15 @@ public:
 	// lookup table struct
 	struct Instruction {
 		std::string inst;
-		opcFunction addr;
-		addrFunction opc;
+		addrFunction addr;
+		opcFunction opc;
 		uint8_t cycles;
 		penaltyFunction penalty;
 	};
 	// create a lookup table that can hold 151 + illegal options
 	static Instruction lookup[0x100];
 	void initInstructions();
-	void execInstruction();
+	void execInstruction(Instruction inst);
 
 	// given a mask (flag), perform OR with the mask to set the flag
 	// i.e N = 10000000 (0x80)
@@ -70,20 +72,25 @@ public:
 	// check the flag status by masking with P::<flag>
 	bool getFlag(P flag) { return status_reg & flag; }
 
-	void updateN(uint8_t& value);
-	void updateZ(uint8_t& value);
-	void updateV(uint8_t& value);
-	void updateC(uint8_t& value);
+	void updateFlag(P flag, bool condition)
+	{
+		if (condition) setFlag(flag); else clearFlag(flag);
+	}
+
 
 	// reads the programcounter and automatically increments it
 	uint8_t fetchByte();
 	uint8_t pull();
+	uint16_t pullWord();
 	void push(const uint8_t& byte);
 	void pushWord(const uint16_t& word);
 
 
 	// Operation Codes
-	void ADC(), JMP(), JSR(),
+	void ADC(), AND(), ASL(), BCC(), BCS(), BEQ(), BIT(), BMI(), BNE(),
+		BPL(), BRK(), BVC(), BVS(), CLC(), CLD(), CLI(), CLV(), 
+		CMP(), CPX(), CPY(), DEC(), DEX(), DEI(), EOR(), INC(), INX(), INY(),
+		JMP(), JSR(),
 		LDA(), LDX(), LDY(), NOP(),
 		PHA(), PHP(), PLA(), PLP(),
 		ROL(), ROR(),

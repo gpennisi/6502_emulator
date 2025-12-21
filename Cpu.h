@@ -85,28 +85,34 @@ public:
 	// Penalty Functions
 	void crossBound(), branch(), sameBound(), np();
 
-	// Operation Codes
-	void ADC(), AND(), ASL(), 
-		BCC(), BCS(), BEQ(), BIT(), BMI(), BNE(), BPL(), BRK(), BVC(), BVS(), 
-		CLC(), CLD(), CLI(), CLV(), CMP(), CPX(), CPY(), 
-		DEC(), DEX(), DEY(), 
-		EOR(), 
-		INC(), INX(), INY(),
-		JMP(), JSR(),
-		LDA(), LDX(), LDY(), LSR(), 
-		NOP(), 
-		ORA(),
-		PHA(), PHP(), PLA(), PLP(),
-		ROL(), ROR(), RTI(), RTS(),
-		SBC(), SEC(), SED(), SEI(), STA(), STX(), STY(),
-		TAX(), TAY(), TSX(), TXA(), TXS(), TYA();
-
-	// Address Modes
+	// --- Address Modes ---
 	void acc(), abs(), absX(), absY(),
 		imm(), impl(), ind(), Xind(), indY(),
 		rel(), zpg(), zpgX(), zpgY();
 
-
-
+	// --- Opcodes ---
+	// Load / Store	
+	void LDA(), LDX(), LDY(), STA(), STX(), STY();
+	// Arithmetic	
+	void ADC(), SBC(), INC(), INX(), INY(), DEC(), DEX(), DEY();
+	// Logic	
+	void AND(), EOR(), ORA(), BIT();
+	// Shift / Rotate	
+	void ASL(), LSR(), ROL(), ROR();
+	// Transfer	
+	void TAX(), TAY(), TSX(), TXA(), TXS(), TYA();
+	// Stack	
+	void PHA(), PHP(), PLA(), PLP();
+	// Control Flow	
+	void JMP(), JSR(), RTS(), RTI();
+	// Branching	
+	void BCC(), BCS(), BEQ(), BMI(), BNE(), BPL(), BVC(), BVS();
+	// Register Flags	
+	void CLC(), CLD(), CLI(), CLV(), SEC(), SED(), SEI();
+	// Comparison	
+	void CMP(), CPX(), CPY();
+	//  System	
+	void BRK(), NOP();
 };
+
 

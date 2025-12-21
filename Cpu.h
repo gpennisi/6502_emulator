@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
+#include <functional>
 #include "Bus.h"
-
 class Cpu
 {
 public:
@@ -59,24 +59,14 @@ public:
 	void initInstructions();
 	void execInstruction(Instruction inst);
 
-	// given a mask (flag), perform OR with the mask to set the flag
-	// i.e N = 10000000 (0x80)
-	// i.e. status_flag = 00001000
-	// N OR status_flag = 10001000
+	// flag manipulation
 	void setFlag(P flag) { status_reg = status_reg | flag; };
-	// given a mask (flag), perform AND with NOT flag
-	// i.e N = 10000000 (0x80), ~N = 01111111
-	// i.e. status_flag = 10001000
-	// ~N AND status_flag = 00001000
 	void clearFlag(P flag) {status_reg = status_reg & (~flag); };
-	// check the flag status by masking with P::<flag>
 	bool getFlag(P flag) { return status_reg & flag; }
-
 	void updateFlag(P flag, bool condition)
 	{
 		if (condition) setFlag(flag); else clearFlag(flag);
 	}
-
 
 	// reads the programcounter and automatically increments it
 	uint8_t fetchByte();
@@ -85,16 +75,30 @@ public:
 	void push(const uint8_t& byte);
 	void pushWord(const uint16_t& word);
 
+	// helper functions
+	uint16_t arithmetic(const uint16_t& value, std::function<uint16_t(uint16_t)> operation);
+	void compare(uint8_t reg, const uint8_t& value);
+	void load(uint8_t& reg, const uint8_t& value);
+	void logic(std::function<void(uint8_t&)> operation);
+	void shift(const uint8_t& mask, std::function<uint8_t(uint8_t)> operation);
+
+	// Penalty Functions
+	void crossBound(), branch(), sameBound(), np();
 
 	// Operation Codes
-	void ADC(), AND(), ASL(), BCC(), BCS(), BEQ(), BIT(), BMI(), BNE(),
-		BPL(), BRK(), BVC(), BVS(), CLC(), CLD(), CLI(), CLV(), 
-		CMP(), CPX(), CPY(), DEC(), DEX(), DEI(), EOR(), INC(), INX(), INY(),
+	void ADC(), AND(), ASL(), 
+		BCC(), BCS(), BEQ(), BIT(), BMI(), BNE(), BPL(), BRK(), BVC(), BVS(), 
+		CLC(), CLD(), CLI(), CLV(), CMP(), CPX(), CPY(), 
+		DEC(), DEX(), DEY(), 
+		EOR(), 
+		INC(), INX(), INY(),
 		JMP(), JSR(),
-		LDA(), LDX(), LDY(), NOP(),
+		LDA(), LDX(), LDY(), LSR(), 
+		NOP(), 
+		ORA(),
 		PHA(), PHP(), PLA(), PLP(),
-		ROL(), ROR(),
-		STA(), STX(), STY(),
+		ROL(), ROR(), RTI(), RTS(),
+		SBC(), SEC(), SED(), SEI(), STA(), STX(), STY(),
 		TAX(), TAY(), TSX(), TXA(), TXS(), TYA();
 
 	// Address Modes
@@ -102,8 +106,7 @@ public:
 		imm(), impl(), ind(), Xind(), indY(),
 		rel(), zpg(), zpgX(), zpgY();
 
-	// Penalty Functions
-	void crossBound(), branch(), sameBound(), np();
+
 
 };
 

@@ -31,6 +31,7 @@ private:
 	uint16_t currentAddress;
 
 	bool isAccumulatorMode = false;
+	uint8_t penalty = 0;
 
 public:
 	Cpu(Bus& b) : bus(b) {};
@@ -45,14 +46,14 @@ public:
 	// pointer to instruction function
 	using opcFunction = void (Cpu::*)();
 	using addrFunction = void (Cpu::*)();
-	using penaltyFunction = void (Cpu::*)();
+
 	// lookup table struct
 	struct Instruction {
 		std::string inst;
 		addrFunction addr;
 		opcFunction opc;
 		uint8_t cycles;
-		penaltyFunction penalty;
+		bool penalty;
 	};
 	// create a lookup table that can hold 151 + illegal options
 	static Instruction lookup[0x100];
@@ -81,16 +82,18 @@ public:
 	void load(uint8_t& reg, const uint8_t& value);
 	void logic(std::function<void(uint8_t&)> operation);
 	void shift(const uint8_t& mask, std::function<uint8_t(uint8_t)> operation);
+	void absoluteIndexed(uint8_t& reg);
 
 	// Penalty Functions
-	void crossBound(), branch(), sameBound(), np();
+	void crossBound(const uint16_t& baseAddress, const uint16_t& finalAddress),
+		branch();
 
 	// --- Address Modes ---
 	void acc(), abs(), absX(), absY(),
 		imm(), impl(), ind(), Xind(), indY(),
 		rel(), zpg(), zpgX(), zpgY();
 
-	// --- Opcodes ---
+	// --- Opcodes ---(this->*instruction.opc)();
 	// Load / Store	
 	void LDA(), LDX(), LDY(), STA(), STX(), STY();
 	// Arithmetic	

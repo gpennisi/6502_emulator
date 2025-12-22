@@ -101,20 +101,25 @@ void Cpu::shift(const uint8_t& mask, std::function<uint8_t(uint8_t)> operation)
 	if (isAccumulatorMode) { A = result; isAccumulatorMode = false; }
 	else { bus.write(result, currentAddress); }
 }
+void Cpu::absoluteIndexed(uint8_t& reg)
+{
+	abs();
+	const uint16_t finalAddress = currentAddress + reg;
+	crossBound(currentAddress, finalAddress);
+	currentAddress = finalAddress;
+}
 
 // Penalty Functions
-void Cpu::crossBound()
+void Cpu::crossBound(const uint16_t& baseAddress, const uint16_t& finalAddress )
 {
-	/*
 	// If the high byte changed, we crossed a page boundary
-	if ((address & 0xFF00) != (final_address & 0xFF00)) {
-		cycleCounter++;
-	}
-	*/
+	penalty = (baseAddress & 0xFF00) != (finalAddress & 0xFF00);
 };
-void Cpu::branch() {};
-void Cpu::sameBound() {};
-void Cpu::np() {};
+void Cpu::branch()
+{
+	crossBound(PC, currentAddress);
+	penalty ++ ;
+};
 
 // Address Modes
 void Cpu::acc() { isAccumulatorMode = true; }
@@ -125,11 +130,15 @@ void Cpu::abs()
 	// shift high_byte and OR low_byte with it
 	currentAddress = ((hh << 8) | ll);
 }
-void Cpu::absX() { abs(); currentAddress += X; }
-void Cpu::absY() { abs(); currentAddress += Y; }
+void Cpu::absX() { absoluteIndexed(X); }
+void Cpu::absY() { absoluteIndexed(Y); }
 void Cpu::imm() { currentAddress = fetchByte(); }
 void Cpu::impl() {};
-void Cpu::rel() { currentAddress = PC + int8_t(fetchByte());}
+void Cpu::rel() 
+{ 
+	branch();
+	currentAddress = PC + int8_t(fetchByte());
+}
 void Cpu::ind()
 {
 	uint8_t ll = fetchByte();
@@ -159,18 +168,15 @@ void Cpu::Xind()
 	currentAddress = (hh << 8) | ll;
 }
 void Cpu::indY()
-{ 
-	uint8_t zeroPageAddress = fetchByte();
-	uint8_t ll = bus.read(zeroPageAddress);
-	uint8_t hh = bus.read((zeroPageAddress+1) & 0xFF);
-	uint16_t indirectAddress = ((uint16_t)hh << 8) | ll;
-	uint16_t effectiveAddress = indirectAddress + Y;
+{
+	zpg();
+	uint8_t ll = bus.read(currentAddress);
+	uint8_t hh = bus.read((currentAddress + 1) & 0xFF);
 
-	// Check for page boundary crossing 
-	if ((indirectAddress & 0xFF00) != (effectiveAddress & 0xFF00)) {
-		cycleCounter++;
-	}
-	currentAddress = indirectAddress + Y;
+	uint16_t base = ((uint16_t)hh << 8) | ll;
+	currentAddress = base + Y;
+
+	crossBound(base, currentAddress);
 }
 void Cpu::zpg()
 {
@@ -180,10 +186,11 @@ void Cpu::zpg()
 	// get the page position
 	currentAddress = fetchByte();
 }
-void Cpu::zpgX() { Cpu::zpg(); currentAddress += X; }
-void Cpu::zpgY() { Cpu::zpg(); currentAddress += Y; }
+void Cpu::zpgX() { Cpu::zpg(); (currentAddress + X) & 0xFF; }
+void Cpu::zpgY() { Cpu::zpg(); (currentAddress + Y) & 0xFF; }
 
-void Cpu::ADC() { 
+void Cpu::ADC() 
+{ 
 	uint8_t addend = bus.read(currentAddress);
 	uint16_t result = arithmetic(
 		A, 
@@ -194,7 +201,10 @@ void Cpu::ADC() {
 	updateFlag(C, result > 0xFF);
 	A = result;
 }
-void Cpu::AND() { logic([value = bus.read(currentAddress)](uint8_t& A) { A &= value; }); }
+void Cpu::AND() 
+{ 
+	logic([value = bus.read(currentAddress)](uint8_t& A) { A &= value; }); 
+}
 void Cpu::ASL()
 {
 	uint8_t value = isAccumulatorMode ? A : bus.read(currentAddress);
@@ -213,7 +223,12 @@ void Cpu::ASL()
 }
 void Cpu::ASL() { shift(0x80, [](uint8_t v) { return v << 1; }); }
 
-void Cpu::BCC() { if (!getFlag(C)) { PC = currentAddress; } }
+void Cpu::BCC() 
+{ 
+	if (!getFlag(C)) { 
+		PC = currentAddress; 
+	} 
+}
 void Cpu::BCS() { if (getFlag(C)) { PC = currentAddress; } }
 void Cpu::BEQ() { if (getFlag(Z)) { PC = currentAddress; } }
 void Cpu::BIT()
@@ -246,7 +261,10 @@ void Cpu::CLC() { clearFlag(C); }
 void Cpu::CLD() { clearFlag(D); }
 void Cpu::CLI() { clearFlag(I); }
 void Cpu::CLV() { clearFlag(V); }
-void Cpu::CMP() { compare(A, bus.read(currentAddress)); }
+void Cpu::CMP() 
+{ 
+	compare(A, bus.read(currentAddress)); 
+}
 void Cpu::CPX() { compare(X, bus.read(currentAddress)); }
 void Cpu::CPY() { compare(Y, bus.read(currentAddress)); }
 
@@ -260,7 +278,9 @@ void Cpu::DEC()
 void Cpu::DEX() { X = (uint8_t)arithmetic(X, [](uint16_t v) { return v - 1; }); }
 void Cpu::DEY() { Y = (uint8_t)arithmetic(Y, [](uint16_t v) { return v - 1; }); }
 
-void Cpu::EOR() { logic([value = bus.read(currentAddress)](uint8_t& A) { A ^= value; }); }
+void Cpu::EOR() { 
+	logic([value = bus.read(currentAddress)](uint8_t& A) { A ^= value; }); 
+}
 
 void Cpu::INC()
 {
@@ -280,12 +300,24 @@ void Cpu::JSR()
 	pushWord(origPC - 1);
 }
 
-void Cpu::LDA() { load(A, bus.read(currentAddress)); }
-void Cpu::LDX() { load(X, bus.read(currentAddress)); }
-void Cpu::LDY() { load(Y, bus.read(currentAddress)); }
+void Cpu::LDA() 
+{ 
+	load(A, bus.read(currentAddress)); 
+}
+void Cpu::LDX() 
+{ 
+	load(X, bus.read(currentAddress)); 
+}
+void Cpu::LDY() 
+{ 
+	load(Y, bus.read(currentAddress)); 
+}
 void Cpu::LSR() { shift(0x01, [](uint8_t v) { return v >> 1; }); }
 
-void Cpu::ORA() { logic([value = bus.read(currentAddress)](uint8_t& A) { A |= value; }); }
+void Cpu::ORA() 
+{ 
+	logic([value = bus.read(currentAddress)](uint8_t& A) { A |= value; }); 
+}
 
 void Cpu::NOP() {}
 
@@ -375,14 +407,14 @@ void Cpu::initInstructions()
 		(indirect, X)	ADC(oper, X)	61	2		6
 		(indirect), Y	ADC(oper), Y	71	2		5 *
 	*/
-	lookup[0x69] = { "ADC",  &Cpu::imm,  &Cpu::ADC, 2, &Cpu::np };
-	lookup[0x65] = { "ADC",  &Cpu::zpg,  &Cpu::ADC, 3, &Cpu::np };
-	lookup[0x75] = { "ADC",  &Cpu::zpgX, &Cpu::ADC, 4, &Cpu::np };
-	lookup[0x6D] = { "ADC",  &Cpu::abs,  &Cpu::ADC, 4, &Cpu::np };
-	lookup[0x7D] = { "ADC",  &Cpu::absX, &Cpu::ADC, 4, &Cpu::crossBound };
-	lookup[0x79] = { "ADC",  &Cpu::absY, &Cpu::ADC, 4, &Cpu::crossBound };
-	lookup[0x61] = { "ADC",  &Cpu::Xind, &Cpu::ADC, 6, &Cpu::np };
-	lookup[0x71] = { "ADC",  &Cpu::indY, &Cpu::ADC, 5, &Cpu::crossBound };
+	lookup[0x69] = { "ADC",  &Cpu::imm,  &Cpu::ADC, 2, false };
+	lookup[0x65] = { "ADC",  &Cpu::zpg,  &Cpu::ADC, 3, false };
+	lookup[0x75] = { "ADC",  &Cpu::zpgX, &Cpu::ADC, 4, false };
+	lookup[0x6D] = { "ADC",  &Cpu::abs,  &Cpu::ADC, 4, false };
+	lookup[0x7D] = { "ADC",  &Cpu::absX, &Cpu::ADC, 4, true  };
+	lookup[0x79] = { "ADC",  &Cpu::absY, &Cpu::ADC, 4, true  };
+	lookup[0x61] = { "ADC",  &Cpu::Xind, &Cpu::ADC, 6, true  };
+	lookup[0x71] = { "ADC",  &Cpu::indY, &Cpu::ADC, 5, false };
 	/* -------------------------------------------------
 	AND
 		AND Memory with Accumulator
@@ -401,14 +433,14 @@ void Cpu::initInstructions()
 		(indirect), Y	AND(oper), Y	31	2		5 *
 
 	*/
-	lookup[0x29] = { "AND",  &Cpu::imm,  &Cpu::AND, 2, &Cpu::np };
-	lookup[0x25] = { "AND",  &Cpu::zpg,  &Cpu::AND, 3, &Cpu::np };
-	lookup[0x35] = { "AND",  &Cpu::zpgX, &Cpu::AND, 4, &Cpu::np };
-	lookup[0x2D] = { "AND",  &Cpu::abs,  &Cpu::AND, 4, &Cpu::np };
-	lookup[0x3D] = { "AND",  &Cpu::absX, &Cpu::AND, 4, &Cpu::crossBound };
-	lookup[0x39] = { "AND",  &Cpu::absY, &Cpu::AND, 4, &Cpu::crossBound };
-	lookup[0x21] = { "AND",  &Cpu::Xind, &Cpu::AND, 6, &Cpu::np };
-	lookup[0x31] = { "AND",  &Cpu::indY, &Cpu::AND, 5, &Cpu::crossBound };
+	lookup[0x29] = { "AND",  &Cpu::imm,  &Cpu::AND, 2, false };
+	lookup[0x25] = { "AND",  &Cpu::zpg,  &Cpu::AND, 3, false };
+	lookup[0x35] = { "AND",  &Cpu::zpgX, &Cpu::AND, 4, false };
+	lookup[0x2D] = { "AND",  &Cpu::abs,  &Cpu::AND, 4, false };
+	lookup[0x3D] = { "AND",  &Cpu::absX, &Cpu::AND, 4, true  };
+	lookup[0x39] = { "AND",  &Cpu::absY, &Cpu::AND, 4, true  };
+	lookup[0x21] = { "AND",  &Cpu::Xind, &Cpu::AND, 6, false };
+	lookup[0x31] = { "AND",  &Cpu::indY, &Cpu::AND, 5, true  };
 	/* -------------------------------------------------
 	ASL
 		Shift Left One Bit(Memory or Accumulator)
@@ -423,11 +455,11 @@ void Cpu::initInstructions()
 		absolute	ASL oper		0E	3		6
 		absolute, X	ASL oper, X		1E	3		7
 	*/
-	lookup[0x0A] = { "ASL",  &Cpu::acc,  &Cpu::ASL, 2, &Cpu::np };
-	lookup[0x06] = { "ASL",  &Cpu::zpg,  &Cpu::ASL, 5, &Cpu::np };
-	lookup[0x16] = { "ASL",  &Cpu::zpgX, &Cpu::ASL, 6, &Cpu::np };
-	lookup[0x0E] = { "ASL",  &Cpu::abs,  &Cpu::ASL, 6, &Cpu::np };
-	lookup[0x1E] = { "ASL",  &Cpu::absX, &Cpu::ASL, 7, &Cpu::np };
+	lookup[0x0A] = { "ASL",  &Cpu::acc,  &Cpu::ASL, 2, false };
+	lookup[0x06] = { "ASL",  &Cpu::zpg,  &Cpu::ASL, 5, false };
+	lookup[0x16] = { "ASL",  &Cpu::zpgX, &Cpu::ASL, 6, false };
+	lookup[0x0E] = { "ASL",  &Cpu::abs,  &Cpu::ASL, 6, false };
+	lookup[0x1E] = { "ASL",  &Cpu::absX, &Cpu::ASL, 7, false };
 	/* -------------------------------------------------
 	BCC
 		Branch on Carry Clear
@@ -439,7 +471,7 @@ void Cpu::initInstructions()
 		relative	BCC oper	90	2		2 * *
 
 	*/
-	lookup[0x90] = { "BCC",  &Cpu::rel,  &Cpu::BCC, 2, &Cpu::branch};
+	lookup[0x90] = { "BCC",  &Cpu::rel,  &Cpu::BCC, 2, true  };
 	/* -------------------------------------------------
 	BCS
 		Branch on Carry Set
@@ -450,7 +482,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		relative	BCS oper	B0	2		2 * *
 	*/
-	lookup[0xB0] = { "BCS",  &Cpu::rel,  &Cpu::BCS, 2, &Cpu::branch };
+	lookup[0xB0] = { "BCS",  &Cpu::rel,  &Cpu::BCS, 2, true  };
 	/* -------------------------------------------------
 	BEQ
 		Branch on Result Zero
@@ -461,7 +493,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		relative	BEQ oper	F0	2		2 * *
 	*/
-	lookup[0xF0] = { "BEQ",  &Cpu::rel,  &Cpu::BEQ, 2, &Cpu::branch };
+	lookup[0xF0] = { "BEQ",  &Cpu::rel,  &Cpu::BEQ, 2, true  };
 	/* -------------------------------------------------
 	BIT
 		Test Bits in Memory with Accumulator
@@ -479,8 +511,8 @@ void Cpu::initInstructions()
 		zeropage	BIT oper	24	2		3
 		absolute	BIT oper	2C	3		4
 	*/
-	lookup[0x24] = { "BIT",  &Cpu::zpg,  &Cpu::BIT, 3, &Cpu::np };
-	lookup[0x2C] = { "BIT",  &Cpu::abs,  &Cpu::BIT, 4, &Cpu::np };
+	lookup[0x24] = { "BIT",  &Cpu::zpg,  &Cpu::BIT, 3, false };
+	lookup[0x2C] = { "BIT",  &Cpu::abs,  &Cpu::BIT, 4, false };
 	/* -------------------------------------------------
 	BMI
 		Branch on Result Minus
@@ -491,7 +523,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		relative	BMI oper	30	2		2 * *
 	*/
-	lookup[0x30] = { "BMI",  &Cpu::rel,  &Cpu::BMI, 2, &Cpu::branch };
+	lookup[0x30] = { "BMI",  &Cpu::rel,  &Cpu::BMI, 2, true  };
 	/* -------------------------------------------------
 	BNE
 		Branch on Result not Zero
@@ -502,7 +534,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		relative	BNE oper	D0	2		2 * *
 	*/
-	lookup[0xD0] = { "BNE",  &Cpu::rel,  &Cpu::BNE, 2, &Cpu::branch };
+	lookup[0xD0] = { "BNE",  &Cpu::rel,  &Cpu::BNE, 2, true  };
 	/* -------------------------------------------------
 	BPL
 		Branch on Result Plus
@@ -513,7 +545,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		relative	BPL oper	10	2		2 * *
 	*/
-	lookup[0x10] = { "BPL",  &Cpu::rel,  &Cpu::BPL, 2, &Cpu::branch };
+	lookup[0x10] = { "BPL",  &Cpu::rel,  &Cpu::BPL, 2, true  };
 	/* -------------------------------------------------
 	BRK
 		Force Break
@@ -534,7 +566,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		BRK			00	1		7
 	*/
-	lookup[0x00] = { "BRK",  &Cpu::impl,  &Cpu::BRK, 7, &Cpu::np };
+	lookup[0x00] = { "BRK",  &Cpu::impl,  &Cpu::BRK, 7, false };
 	/* -------------------------------------------------
 	BVC
 		Branch on Overflow Clear
@@ -545,7 +577,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		relative	BVC oper	50	2		2 * *
 	*/
-	lookup[0x50] = { "BVC",  &Cpu::rel,  &Cpu::BVC, 2, &Cpu::branch };
+	lookup[0x50] = { "BVC",  &Cpu::rel,  &Cpu::BVC, 2, true  };
 	/* -------------------------------------------------
 	BVS
 		Branch on Overflow Set
@@ -556,7 +588,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		relative	BVS oper	70	2		2 * *
 	*/
-	lookup[0x70] = { "BVS",  &Cpu::rel,  &Cpu::BVS, 2, &Cpu::branch };
+	lookup[0x70] = { "BVS",  &Cpu::rel,  &Cpu::BVS, 2, true  };
 	/* -------------------------------------------------
 	CLC
 		Clear Carry Flag
@@ -567,7 +599,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		CLC			18	1		2
 	*/
-	lookup[0x18] = { "CLC",  &Cpu::impl,  &Cpu::CLC, 2, &Cpu::np };
+	lookup[0x18] = { "CLC",  &Cpu::impl,  &Cpu::CLC, 2, false };
 	/* -------------------------------------------------
 	CLD
 		Clear Decimal Mode
@@ -578,7 +610,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		CLD			D8	1		2
 	*/
-	lookup[0xD8] = { "CLD",  &Cpu::impl,  &Cpu::CLD, 2, &Cpu::np };
+	lookup[0xD8] = { "CLD",  &Cpu::impl,  &Cpu::CLD, 2, false };
 	/* -------------------------------------------------
 	CLI
 		Clear Interrupt Disable Bit
@@ -589,7 +621,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		CLI			58	1		2
 	*/
-	lookup[0x58] = { "CLI",  &Cpu::impl,  &Cpu::CLI, 2, &Cpu::np };
+	lookup[0x58] = { "CLI",  &Cpu::impl,  &Cpu::CLI, 2, false };
 	/* -------------------------------------------------
 	CLV
 		Clear Overflow Flag
@@ -600,7 +632,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		CLV			B8	1		2
 	*/
-	lookup[0xB8] = { "CLV",  &Cpu::impl,  &Cpu::CLV, 2, &Cpu::np };
+	lookup[0xB8] = { "CLV",  &Cpu::impl,  &Cpu::CLV, 2, false };
 	/* -------------------------------------------------
 	CMP
 		Compare Memory with Accumulator
@@ -618,14 +650,14 @@ void Cpu::initInstructions()
 		(indirect, X)	CMP(oper, X)		C1	2		6
 		(indirect), Y	CMP(oper), Y		D1	2		5 *
 	*/
-	lookup[0xC9] = { "CMP",  &Cpu::imm,  &Cpu::CMP, 2, &Cpu::np };
-	lookup[0xC5] = { "CMP",  &Cpu::zpg,  &Cpu::CMP, 3, &Cpu::np };
-	lookup[0xD5] = { "CMP",  &Cpu::zpgX, &Cpu::CMP, 4, &Cpu::np };
-	lookup[0xCD] = { "CMP",  &Cpu::abs,  &Cpu::CMP, 4, &Cpu::np };
-	lookup[0xDD] = { "CMP",  &Cpu::absX, &Cpu::CMP, 4, &Cpu::crossBound };
-	lookup[0xD9] = { "CMP",  &Cpu::absY, &Cpu::CMP, 4, &Cpu::crossBound };
-	lookup[0xC1] = { "CMP",  &Cpu::Xind, &Cpu::CMP, 6, &Cpu::np };
-	lookup[0xD1] = { "CMP",  &Cpu::indY, &Cpu::CMP, 5, &Cpu::crossBound };
+	lookup[0xC9] = { "CMP",  &Cpu::imm,  &Cpu::CMP, 2, false };
+	lookup[0xC5] = { "CMP",  &Cpu::zpg,  &Cpu::CMP, 3, false };
+	lookup[0xD5] = { "CMP",  &Cpu::zpgX, &Cpu::CMP, 4, false };
+	lookup[0xCD] = { "CMP",  &Cpu::abs,  &Cpu::CMP, 4, false };
+	lookup[0xDD] = { "CMP",  &Cpu::absX, &Cpu::CMP, 4, true  };
+	lookup[0xD9] = { "CMP",  &Cpu::absY, &Cpu::CMP, 4, true  };
+	lookup[0xC1] = { "CMP",  &Cpu::Xind, &Cpu::CMP, 6, false };
+	lookup[0xD1] = { "CMP",  &Cpu::indY, &Cpu::CMP, 5, true  };
 	/* -------------------------------------------------
 	CPX
 		Compare Memory and Index X
@@ -638,9 +670,9 @@ void Cpu::initInstructions()
 		zeropage	CPX oper	E4	2		3
 		absolute	CPX oper	EC	3		4
 	*/
-	lookup[0xE0] = { "CPX",  &Cpu::imm,  &Cpu::CPX, 2, &Cpu::np };
-	lookup[0xE4] = { "CPX",  &Cpu::zpg,  &Cpu::CPX, 3, &Cpu::np };
-	lookup[0xEC] = { "CPX",  &Cpu::abs,  &Cpu::CPX, 4, &Cpu::np };
+	lookup[0xE0] = { "CPX",  &Cpu::imm,  &Cpu::CPX, 2, false };
+	lookup[0xE4] = { "CPX",  &Cpu::zpg,  &Cpu::CPX, 3, false };
+	lookup[0xEC] = { "CPX",  &Cpu::abs,  &Cpu::CPX, 4, false };
 	/* -------------------------------------------------
 	CPY
 		Compare Memory and Index Y
@@ -653,9 +685,9 @@ void Cpu::initInstructions()
 		zeropage	CPY oper	C4	2		3
 		absolute	CPY oper	CC	3		4
 	*/
-	lookup[0xC0] = { "CPY",  &Cpu::imm,  &Cpu::CPY, 2, &Cpu::np };
-	lookup[0xC4] = { "CPY",  &Cpu::zpg,  &Cpu::CPY, 3, &Cpu::np };
-	lookup[0xCC] = { "CPY",  &Cpu::abs,  &Cpu::CPY, 4, &Cpu::np };
+	lookup[0xC0] = { "CPY",  &Cpu::imm,  &Cpu::CPY, 2, false };
+	lookup[0xC4] = { "CPY",  &Cpu::zpg,  &Cpu::CPY, 3, false };
+	lookup[0xCC] = { "CPY",  &Cpu::abs,  &Cpu::CPY, 4, false };
 	/* -------------------------------------------------
 	DEC
 		Decrement Memory by One
@@ -669,10 +701,10 @@ void Cpu::initInstructions()
 		absolute	DEC oper	CE	3		6
 		absolute, X	DEC oper, X	DE	3		7
 	*/
-	lookup[0xC6] = { "DEC",  &Cpu::zpg,  &Cpu::DEC, 5, &Cpu::np };
-	lookup[0xD6] = { "DEC",  &Cpu::zpgX, &Cpu::DEC, 6, &Cpu::np };
-	lookup[0xCE] = { "DEC",  &Cpu::abs,  &Cpu::DEC, 6, &Cpu::np };
-	lookup[0xDE] = { "DEC",  &Cpu::absX, &Cpu::DEC, 7, &Cpu::np };
+	lookup[0xC6] = { "DEC",  &Cpu::zpg,  &Cpu::DEC, 5, false };
+	lookup[0xD6] = { "DEC",  &Cpu::zpgX, &Cpu::DEC, 6, false };
+	lookup[0xCE] = { "DEC",  &Cpu::abs,  &Cpu::DEC, 6, false };
+	lookup[0xDE] = { "DEC",  &Cpu::absX, &Cpu::DEC, 7, false };
 	/* -------------------------------------------------
 	DEX
 		Decrement Index X by One
@@ -683,7 +715,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		DEX			CA	1		2
 	*/
-	lookup[0xCA] = { "DEX",  &Cpu::impl,  &Cpu::DEX, 2, &Cpu::np };
+	lookup[0xCA] = { "DEX",  &Cpu::impl,  &Cpu::DEX, 2, false };
 	/* -------------------------------------------------
 	DEY
 		Decrement Index Y by One
@@ -694,7 +726,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		DEY			88	1		2
 	*/
-	lookup[0x88] = { "DEY",  &Cpu::impl,  &Cpu::DEY, 2, &Cpu::np };
+	lookup[0x88] = { "DEY",  &Cpu::impl,  &Cpu::DEY, 2, false };
 	/* -------------------------------------------------
 	EOR
 		Exclusive - OR Memory with Accumulator
@@ -711,13 +743,13 @@ void Cpu::initInstructions()
 		absolute, Y		EOR oper, Y		59	3		4 *
 		(indirect, X)	EOR(oper, X)	41	2		6
 	*/
-	lookup[0x49] = { "EOR",  &Cpu::imm,  &Cpu::EOR, 2, &Cpu::np };
-	lookup[0x45] = { "EOR",  &Cpu::zpg,  &Cpu::EOR, 3, &Cpu::np };
-	lookup[0x55] = { "EOR",  &Cpu::zpgX, &Cpu::EOR, 4, &Cpu::np };
-	lookup[0x4D] = { "EOR",  &Cpu::abs,  &Cpu::EOR, 4, &Cpu::np };
-	lookup[0x5D] = { "EOR",  &Cpu::absX, &Cpu::EOR, 4, &Cpu::crossBound };
-	lookup[0x59] = { "EOR",  &Cpu::absY, &Cpu::EOR, 4, &Cpu::crossBound };
-	lookup[0x41] = { "EOR",  &Cpu::Xind, &Cpu::EOR, 6, &Cpu::np };
+	lookup[0x49] = { "EOR",  &Cpu::imm,  &Cpu::EOR, 2, false };
+	lookup[0x45] = { "EOR",  &Cpu::zpg,  &Cpu::EOR, 3, false };
+	lookup[0x55] = { "EOR",  &Cpu::zpgX, &Cpu::EOR, 4, false };
+	lookup[0x4D] = { "EOR",  &Cpu::abs,  &Cpu::EOR, 4, false };
+	lookup[0x5D] = { "EOR",  &Cpu::absX, &Cpu::EOR, 4, true  };
+	lookup[0x59] = { "EOR",  &Cpu::absY, &Cpu::EOR, 4, true  };
+	lookup[0x41] = { "EOR",  &Cpu::Xind, &Cpu::EOR, 6, false };
 	/* -------------------------------------------------
 	INC
 		Increment Memory by One
@@ -731,10 +763,10 @@ void Cpu::initInstructions()
 		absolute	INC oper	EE	3		6
 		absolute, X	INC oper, X	FE	3		7
 	*/
-	lookup[0xE6] = { "INC",  &Cpu::zpg,  &Cpu::INC, 5, &Cpu::np };
-	lookup[0xF6] = { "INC",  &Cpu::zpgX, &Cpu::INC, 6, &Cpu::np };
-	lookup[0xEE] = { "INC",  &Cpu::abs,  &Cpu::INC, 6, &Cpu::np };
-	lookup[0xFE] = { "INC",  &Cpu::absX, &Cpu::INC, 7, &Cpu::np };
+	lookup[0xE6] = { "INC",  &Cpu::zpg,  &Cpu::INC, 5, false };
+	lookup[0xF6] = { "INC",  &Cpu::zpgX, &Cpu::INC, 6, false };
+	lookup[0xEE] = { "INC",  &Cpu::abs,  &Cpu::INC, 6, false };;
+	lookup[0xFE] = { "INC",  &Cpu::absX, &Cpu::INC, 7, false };
 	/* -------------------------------------------------
 	INX
 		Increment Index X by One
@@ -745,7 +777,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		INX			E8	1		2
 	*/
-	lookup[0xE8] = { "INX",  &Cpu::impl,  &Cpu::INX, 2, &Cpu::np };
+	lookup[0xE8] = { "INX",  &Cpu::impl,  &Cpu::INX, 2, false };
 	/* -------------------------------------------------
 	INY
 		Increment Index Y by One
@@ -756,7 +788,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		INY			C8	1		2
 	*/
-	lookup[0xC8] = { "INY",  &Cpu::impl,  &Cpu::INY, 2, &Cpu::np };
+	lookup[0xC8] = { "INY",  &Cpu::impl,  &Cpu::INY, 2, false };
 	/* -------------------------------------------------
 	JMP
 		Jump to New Location
@@ -769,8 +801,8 @@ void Cpu::initInstructions()
 		absolute	JMP oper	4C	3		3
 		indirect	JMP(oper)	6C	3		5 * **
 	*/
-	lookup[0x4C] = { "JMP",  &Cpu::abs,  &Cpu::JMP, 3, &Cpu::np };
-	lookup[0x6C] = { "JMP",  &Cpu::ind,  &Cpu::JMP, 5, &Cpu::sameBound };
+	lookup[0x4C] = { "JMP",  &Cpu::abs,  &Cpu::JMP, 3, false };
+	lookup[0x6C] = { "JMP",  &Cpu::ind,  &Cpu::JMP, 5, false };
 	/* -------------------------------------------------
 	JSR
 		Jump to New Location Saving Return Address
@@ -784,7 +816,7 @@ void Cpu::initInstructions()
 		absolute	JSR oper	20	3		6
 
 	*/
-	lookup[0x20] = { "JSR",  &Cpu::abs,  &Cpu::JSR, 6, &Cpu::np };
+	lookup[0x20] = { "JSR",  &Cpu::abs,  &Cpu::JSR, 6, false };
 	/* -------------------------------------------------
 	LDA
 		Load Accumulator with Memory
@@ -802,14 +834,14 @@ void Cpu::initInstructions()
 		(indirect, X)	LDA(oper, X)		A1	2		6
 		(indirect), Y	LDA(oper), Y		B1	2		5 *
 	*/
-	lookup[0xA9] = { "LDA",  &Cpu::imm,  &Cpu::LDA, 2, &Cpu::np };
-	lookup[0xA5] = { "LDA",  &Cpu::zpg,  &Cpu::LDA, 3, &Cpu::np };
-	lookup[0xB5] = { "LDA",  &Cpu::zpgX, &Cpu::LDA, 4, &Cpu::np };
-	lookup[0xAD] = { "LDA",  &Cpu::abs,  &Cpu::LDA, 4, &Cpu::np };
-	lookup[0xBD] = { "LDA",  &Cpu::absX, &Cpu::LDA, 4, &Cpu::crossBound };
-	lookup[0xB9] = { "LDA",  &Cpu::absY, &Cpu::LDA, 4, &Cpu::crossBound };
-	lookup[0xA1] = { "LDA",  &Cpu::Xind, &Cpu::LDA, 6, &Cpu::np };
-	lookup[0xB1] = { "LDA",  &Cpu::indY, &Cpu::LDA, 5, &Cpu::crossBound };
+	lookup[0xA9] = { "LDA",  &Cpu::imm,  &Cpu::LDA, 2, false };
+	lookup[0xA5] = { "LDA",  &Cpu::zpg,  &Cpu::LDA, 3, false };
+	lookup[0xB5] = { "LDA",  &Cpu::zpgX, &Cpu::LDA, 4, false };
+	lookup[0xAD] = { "LDA",  &Cpu::abs,  &Cpu::LDA, 4, false };
+	lookup[0xBD] = { "LDA",  &Cpu::absX, &Cpu::LDA, 4, true  };
+	lookup[0xB9] = { "LDA",  &Cpu::absY, &Cpu::LDA, 4, true  };
+	lookup[0xA1] = { "LDA",  &Cpu::Xind, &Cpu::LDA, 6, false };
+	lookup[0xB1] = { "LDA",  &Cpu::indY, &Cpu::LDA, 5, true  };
 	/* -------------------------------------------------
 	LDX
 		Load Index X with Memory
@@ -824,11 +856,11 @@ void Cpu::initInstructions()
 		absolute	LDX oper	AE	3		4
 		absolute, Y	LDX oper, Y	BE	3		4 *
 	*/
-	lookup[0xA2] = { "LDX",  &Cpu::imm,  &Cpu::LDX, 2, &Cpu::np };
-	lookup[0xA6] = { "LDX",  &Cpu::zpg,  &Cpu::LDX, 3, &Cpu::np };
-	lookup[0xB6] = { "LDX",  &Cpu::zpgY, &Cpu::LDX, 4, &Cpu::np };
-	lookup[0xAE] = { "LDX",  &Cpu::abs,  &Cpu::LDX, 4, &Cpu::np };
-	lookup[0xBE] = { "LDX",  &Cpu::absY, &Cpu::LDX, 4, &Cpu::crossBound };
+	lookup[0xA2] = { "LDX",  &Cpu::imm,  &Cpu::LDX, 2, false };
+	lookup[0xA6] = { "LDX",  &Cpu::zpg,  &Cpu::LDX, 3, false };
+	lookup[0xB6] = { "LDX",  &Cpu::zpgY, &Cpu::LDX, 4, false };
+	lookup[0xAE] = { "LDX",  &Cpu::abs,  &Cpu::LDX, 4, false };
+	lookup[0xBE] = { "LDX",  &Cpu::absY, &Cpu::LDX, 4, true  };
 	/* -------------------------------------------------
 		LDY
 		Load Index Y with Memory
@@ -843,11 +875,11 @@ void Cpu::initInstructions()
 		absolute	LDY oper	AC	3		4
 		absolute, X	LDY oper, X	BC	3		4 *
 	*/
-	lookup[0xA0] = { "LDY",  &Cpu::imm,  &Cpu::LDY, 2, &Cpu::np };
-	lookup[0xA4] = { "LDY",  &Cpu::zpg,  &Cpu::LDY, 3, &Cpu::np };
-	lookup[0xB4] = { "LDY",  &Cpu::zpgX, &Cpu::LDY, 4, &Cpu::np };
-	lookup[0xAC] = { "LDY",  &Cpu::abs,  &Cpu::LDY, 4, &Cpu::np };
-	lookup[0xBC] = { "LDY",  &Cpu::absX, &Cpu::LDY, 4, &Cpu::crossBound };
+	lookup[0xA0] = { "LDY",  &Cpu::imm,  &Cpu::LDY, 2, false };
+	lookup[0xA4] = { "LDY",  &Cpu::zpg,  &Cpu::LDY, 3, false };
+	lookup[0xB4] = { "LDY",  &Cpu::zpgX, &Cpu::LDY, 4, false };
+	lookup[0xAC] = { "LDY",  &Cpu::abs,  &Cpu::LDY, 4, false };
+	lookup[0xBC] = { "LDY",  &Cpu::absX, &Cpu::LDY, 4, true  };
 	/* -------------------------------------------------
 	LSR
 		Shift One Bit Right(Memory or Accumulator)
@@ -862,11 +894,11 @@ void Cpu::initInstructions()
 		absolute	LSR oper	4E	3		6
 		absolute, X	LSR oper, X	5E	3		7
 	*/
-	lookup[0x4A] = { "LSR",  &Cpu::acc,  &Cpu::LSR, 2, &Cpu::np };
-	lookup[0x46] = { "LSR",  &Cpu::zpg,  &Cpu::LSR, 5, &Cpu::np };
-	lookup[0x56] = { "LSR",  &Cpu::zpgX, &Cpu::LSR, 6, &Cpu::np };
-	lookup[0x4E] = { "LSR",  &Cpu::abs,  &Cpu::LSR, 6, &Cpu::np };
-	lookup[0x5E] = { "LSR",  &Cpu::absX, &Cpu::LSR, 7, &Cpu::np };
+	lookup[0x4A] = { "LSR",  &Cpu::acc,  &Cpu::LSR, 2, false };
+	lookup[0x46] = { "LSR",  &Cpu::zpg,  &Cpu::LSR, 5, false };
+	lookup[0x56] = { "LSR",  &Cpu::zpgX, &Cpu::LSR, 6, false };
+	lookup[0x4E] = { "LSR",  &Cpu::abs,  &Cpu::LSR, 6, false };
+	lookup[0x5E] = { "LSR",  &Cpu::absX, &Cpu::LSR, 7, true  };
 	/* -------------------------------------------------
 	NOP
 		No Operation
@@ -877,7 +909,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc		bytes	cycles
 		implied		NOP			EA		1		2
 	*/
-	lookup[0xEA] = { "NOP",  &Cpu::impl, &Cpu::NOP, 2, &Cpu::np };
+	lookup[0xEA] = { "NOP",  &Cpu::impl, &Cpu::NOP, 2, false };
 	/* -------------------------------------------------
 	ORA
 		OR Memory with Accumulator
@@ -895,14 +927,14 @@ void Cpu::initInstructions()
 		(indirect, X)	ORA(oper, X)	01	2		6
 		(indirect), Y	ORA(oper), Y	11	2		5 *
 	*/
-	lookup[0x09] = { "ORA",  &Cpu::imm,  &Cpu::ORA, 2, &Cpu::np };
-	lookup[0x05] = { "ORA",  &Cpu::zpg,  &Cpu::ORA, 3, &Cpu::np };
-	lookup[0x15] = { "ORA",  &Cpu::zpgX, &Cpu::ORA, 4, &Cpu::np };
-	lookup[0x0D] = { "ORA",  &Cpu::abs,  &Cpu::ORA, 4, &Cpu::np };
-	lookup[0x1D] = { "ORA",  &Cpu::absX, &Cpu::ORA, 4, &Cpu::crossBound };
-	lookup[0x19] = { "ORA",  &Cpu::absY, &Cpu::ORA, 4, &Cpu::crossBound };
-	lookup[0x01] = { "ORA",  &Cpu::Xind, &Cpu::ORA, 6, &Cpu::np };
-	lookup[0x11] = { "ORA",  &Cpu::indY, &Cpu::ORA, 5, &Cpu::crossBound };
+	lookup[0x09] = { "ORA",  &Cpu::imm,  &Cpu::ORA, 2, false };
+	lookup[0x05] = { "ORA",  &Cpu::zpg,  &Cpu::ORA, 3, false };
+	lookup[0x15] = { "ORA",  &Cpu::zpgX, &Cpu::ORA, 4, false };
+	lookup[0x0D] = { "ORA",  &Cpu::abs,  &Cpu::ORA, 4, false };
+	lookup[0x1D] = { "ORA",  &Cpu::absX, &Cpu::ORA, 4, true  };
+	lookup[0x19] = { "ORA",  &Cpu::absY, &Cpu::ORA, 4, true };
+	lookup[0x01] = { "ORA",  &Cpu::Xind, &Cpu::ORA, 6, false };
+	lookup[0x11] = { "ORA",  &Cpu::indY, &Cpu::ORA, 5, true };
 	/* -------------------------------------------------
 	PHA
 		Push Accumulator on Stack
@@ -913,7 +945,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		PHA			48	1		3
 	*/
-	lookup[0x48] = { "PHA",  &Cpu::impl, &Cpu::PHA, 3, &Cpu::np };
+	lookup[0x48] = { "PHA",  &Cpu::impl, &Cpu::PHA, 3, false };
 	/* -------------------------------------------------
 	PHP
 		Push Processor Status on Stack
@@ -927,7 +959,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		PHP			08	1		3
 	*/
-	lookup[0x08] = { "PHP",  &Cpu::impl, &Cpu::PHP, 3, &Cpu::np };
+	lookup[0x08] = { "PHP",  &Cpu::impl, &Cpu::PHP, 3, false };
 	/* -------------------------------------------------
 	PLA
 		Pull Accumulator from Stack
@@ -938,7 +970,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		PLA			68	1		4
 	*/
-	lookup[0x68] = { "PLA",  &Cpu::impl, &Cpu::PLA, 4, &Cpu::np };
+	lookup[0x68] = { "PLA",  &Cpu::impl, &Cpu::PLA, 4, false };
 	/* -------------------------------------------------
 	PLP
 		Pull Processor Status from Stack
@@ -952,7 +984,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		PLP			28	1		4
 	*/
-	lookup[0x28] = { "PLP",  &Cpu::impl, &Cpu::PLP, 4, &Cpu::np };
+	lookup[0x28] = { "PLP",  &Cpu::impl, &Cpu::PLP, 4, false };
 	/* -------------------------------------------------
 	ROL
 		Rotate One Bit Left(Memory or Accumulator)
@@ -967,11 +999,11 @@ void Cpu::initInstructions()
 		absolute	ROL oper	2E	3		6
 		absolute, X	ROL oper, X	3E	3		7
 	*/
-	lookup[0x2A] = { "ROL",  &Cpu::acc,  &Cpu::ROL, 2, &Cpu::np };
-	lookup[0x26] = { "ROL",  &Cpu::zpg,  &Cpu::ROL, 5, &Cpu::np };
-	lookup[0x36] = { "ROL",  &Cpu::zpgX, &Cpu::ROL, 6, &Cpu::np };
-	lookup[0x2E] = { "ROL",  &Cpu::abs,  &Cpu::ROL, 6, &Cpu::np };
-	lookup[0x3E] = { "ROL",  &Cpu::absX, &Cpu::ROL, 7, &Cpu::np };
+	lookup[0x2A] = { "ROL",  &Cpu::acc,  &Cpu::ROL, 2, false };
+	lookup[0x26] = { "ROL",  &Cpu::zpg,  &Cpu::ROL, 5, false };
+	lookup[0x36] = { "ROL",  &Cpu::zpgX, &Cpu::ROL, 6, false };
+	lookup[0x2E] = { "ROL",  &Cpu::abs,  &Cpu::ROL, 6, false };
+	lookup[0x3E] = { "ROL",  &Cpu::absX, &Cpu::ROL, 7, false };
 	/* -------------------------------------------------
 	ROR
 		Rotate One Bit Right(Memory or Accumulator)
@@ -986,11 +1018,11 @@ void Cpu::initInstructions()
 		absolute	ROR oper	6E	3		6
 		absolute, X	ROR oper, X	7E	3		7
 	*/
-	lookup[0x6A] = { "ROR",  &Cpu::acc,  &Cpu::ROR, 2, &Cpu::np };
-	lookup[0x66] = { "ROR",  &Cpu::zpg,  &Cpu::ROR, 5, &Cpu::np };
-	lookup[0x76] = { "ROR",  &Cpu::zpgX, &Cpu::ROR, 6, &Cpu::np };
-	lookup[0x6E] = { "ROR",  &Cpu::abs,  &Cpu::ROR, 6, &Cpu::np };
-	lookup[0x7E] = { "ROR",  &Cpu::absX, &Cpu::ROR, 7, &Cpu::np };
+	lookup[0x6A] = { "ROR",  &Cpu::acc,  &Cpu::ROR, 2, false };
+	lookup[0x66] = { "ROR",  &Cpu::zpg,  &Cpu::ROR, 5, false };
+	lookup[0x76] = { "ROR",  &Cpu::zpgX, &Cpu::ROR, 6, false };;
+	lookup[0x6E] = { "ROR",  &Cpu::abs,  &Cpu::ROR, 6, false };
+	lookup[0x7E] = { "ROR",  &Cpu::absX, &Cpu::ROR, 7, false };
 	/* -------------------------------------------------
 	RTI
 		Return from Interrupt
@@ -1004,7 +1036,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		RTI			40	1		6
 	*/
-	lookup[0x40] = { "RTI",  &Cpu::impl,  &Cpu::RTI, 6, &Cpu::np };
+	lookup[0x40] = { "RTI",  &Cpu::impl,  &Cpu::RTI, 6, false };
 	/* -------------------------------------------------
 	RTS
 		Return from Subroutine
@@ -1015,7 +1047,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		RTS			60	1		6
 	*/
-	lookup[0x60] = { "RTS",  &Cpu::impl,  &Cpu::RTS, 6, &Cpu::np };
+	lookup[0x60] = { "RTS",  &Cpu::impl,  &Cpu::RTS, 6, false };
 	/* -------------------------------------------------
 	SBC
 		Subtract Memory from Accumulator with Borrow
@@ -1033,14 +1065,14 @@ void Cpu::initInstructions()
 		(indirect, X)	SBC(oper, X)	E1	2		6
 		(indirect), Y	SBC(oper), Y	F1	2		5 *
 	*/
-	lookup[0xE9] = { "SBC",  &Cpu::imm,  &Cpu::SBC, 2, &Cpu::np };
-	lookup[0xE5] = { "SBC",  &Cpu::zpg,  &Cpu::SBC, 3, &Cpu::np };
-	lookup[0xF5] = { "SBC",  &Cpu::zpgX, &Cpu::SBC, 4, &Cpu::np };
-	lookup[0xED] = { "SBC",  &Cpu::abs,  &Cpu::SBC, 4, &Cpu::np };
-	lookup[0xFD] = { "SBC",  &Cpu::absX, &Cpu::SBC, 4, &Cpu::crossBound };
-	lookup[0xF9] = { "SBC",  &Cpu::absY, &Cpu::SBC, 4, &Cpu::crossBound };
-	lookup[0xE1] = { "SBC",  &Cpu::Xind, &Cpu::SBC, 6, &Cpu::np };
-	lookup[0xF1] = { "SBC",  &Cpu::indY, &Cpu::SBC, 5, &Cpu::crossBound };
+	lookup[0xE9] = { "SBC",  &Cpu::imm,  &Cpu::SBC, 2, false };
+	lookup[0xE5] = { "SBC",  &Cpu::zpg,  &Cpu::SBC, 3, false };
+	lookup[0xF5] = { "SBC",  &Cpu::zpgX, &Cpu::SBC, 4, false };
+	lookup[0xED] = { "SBC",  &Cpu::abs,  &Cpu::SBC, 4, false };
+	lookup[0xFD] = { "SBC",  &Cpu::absX, &Cpu::SBC, 4, true  };
+	lookup[0xF9] = { "SBC",  &Cpu::absY, &Cpu::SBC, 4, true  };
+	lookup[0xE1] = { "SBC",  &Cpu::Xind, &Cpu::SBC, 6, false };
+	lookup[0xF1] = { "SBC",  &Cpu::indY, &Cpu::SBC, 5, true  };
 	/* -------------------------------------------------
 	SEC
 		Set Carry Flag
@@ -1051,7 +1083,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		SEC			38	1		2
 	*/
-	lookup[0x38] = { "SEC",  &Cpu::impl,  &Cpu::SEC, 2, &Cpu::np };
+	lookup[0x38] = { "SEC",  &Cpu::impl,  &Cpu::SEC, 2, false };
 	/* -------------------------------------------------
 	SED
 		Set Decimal Flag
@@ -1062,7 +1094,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		SED			F8	1		2
 	*/
-	lookup[0xF8] = { "SED",  &Cpu::impl,  &Cpu::SED, 2, &Cpu::np };
+	lookup[0xF8] = { "SED",  &Cpu::impl,  &Cpu::SED, 2, false };
 	/* -------------------------------------------------
 	SEI
 		Set Interrupt Disable Status
@@ -1073,7 +1105,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		SEI			78	1		2
 	*/
-	lookup[0x78] = { "SEI",  &Cpu::impl,  &Cpu::SEI, 2, &Cpu::np };
+	lookup[0x78] = { "SEI",  &Cpu::impl,  &Cpu::SEI, 2, false };
 	/* -------------------------------------------------
 	STA
 		Store Accumulator in Memory
@@ -1090,13 +1122,13 @@ void Cpu::initInstructions()
 		(indirect, X)	STA(oper, X)	81	 2		6
 		(indirect), Y	STA(oper), Y	91	 2		6
 	*/
-	lookup[0x85] = { "STA",  &Cpu::zpg,  &Cpu::STA, 3, &Cpu::np };
-	lookup[0x95] = { "STA",  &Cpu::zpgX, &Cpu::STA, 4, &Cpu::np };
-	lookup[0x8D] = { "STA",  &Cpu::abs,  &Cpu::STA, 4, &Cpu::np };
-	lookup[0x9D] = { "STA",  &Cpu::absX, &Cpu::STA, 5, &Cpu::np };
-	lookup[0x99] = { "STA",  &Cpu::absY, &Cpu::STA, 5, &Cpu::np };
-	lookup[0x81] = { "STA",  &Cpu::Xind, &Cpu::STA, 6, &Cpu::np };
-	lookup[0x91] = { "STA",  &Cpu::indY, &Cpu::STA, 6, &Cpu::np };
+	lookup[0x85] = { "STA",  &Cpu::zpg,  &Cpu::STA, 3, false };
+	lookup[0x95] = { "STA",  &Cpu::zpgX, &Cpu::STA, 4, false };
+	lookup[0x8D] = { "STA",  &Cpu::abs,  &Cpu::STA, 4, false };
+	lookup[0x9D] = { "STA",  &Cpu::absX, &Cpu::STA, 5, false };
+	lookup[0x99] = { "STA",  &Cpu::absY, &Cpu::STA, 5, false };
+	lookup[0x81] = { "STA",  &Cpu::Xind, &Cpu::STA, 6, false };
+	lookup[0x91] = { "STA",  &Cpu::indY, &Cpu::STA, 6, false };
 	/* -------------------------------------------------
 	STX
 		Store Index X in Memory
@@ -1109,9 +1141,9 @@ void Cpu::initInstructions()
 		zeropage, Y	STX oper, Y	96	2		4
 		absolute	STX oper	8E	3		4
 	*/
-	lookup[0x86] = { "STX",  &Cpu::zpg,  &Cpu::STX, 3, &Cpu::np };
-	lookup[0x96] = { "STX",  &Cpu::zpgY, &Cpu::STX, 4, &Cpu::np };
-	lookup[0x8E] = { "STX",  &Cpu::abs,  &Cpu::STX, 4, &Cpu::np };
+	lookup[0x86] = { "STX",  &Cpu::zpg,  &Cpu::STX, 3, false };
+	lookup[0x96] = { "STX",  &Cpu::zpgY, &Cpu::STX, 4, false };
+	lookup[0x8E] = { "STX",  &Cpu::abs,  &Cpu::STX, 4, false };
 	/* -------------------------------------------------
 	STY
 		Sore Index Y in Memory
@@ -1124,9 +1156,9 @@ void Cpu::initInstructions()
 		zeropage, X	STY oper, X	94	2	4
 		absolute	STY oper	8C	3	4
 	*/
-	lookup[0x84] = { "STY",  &Cpu::zpg,  &Cpu::STY, 3, &Cpu::np };
-	lookup[0x94] = { "STY",  &Cpu::zpgX, &Cpu::STY, 4, &Cpu::np };
-	lookup[0x8C] = { "STY",  &Cpu::abs,  &Cpu::STY, 4, &Cpu::np };
+	lookup[0x84] = { "STY",  &Cpu::zpg,  &Cpu::STY, 3, false };
+	lookup[0x94] = { "STY",  &Cpu::zpgX, &Cpu::STY, 4, false };
+	lookup[0x8C] = { "STY",  &Cpu::abs,  &Cpu::STY, 4, false };
 	/* -------------------------------------------------
 	TAX
 		Transfer Accumulator to Index X
@@ -1137,7 +1169,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		TAX			AA	1		2
 	*/
-	lookup[0xAA] = { "TAX",  &Cpu::impl, &Cpu::TAX, 2, &Cpu::np };
+	lookup[0xAA] = { "TAX",  &Cpu::impl, &Cpu::TAX, 2, false };
 	/* -------------------------------------------------
 	TAY
 		Transfer Accumulator to Index Y
@@ -1148,7 +1180,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		TAY			A8	1		2
 	*/
-	lookup[0xA8] = { "TAY",  &Cpu::impl, &Cpu::TAY, 2, &Cpu::np };
+	lookup[0xA8] = { "TAY",  &Cpu::impl, &Cpu::TAY, 2, false };
 	/* -------------------------------------------------
 	TSX
 		Transfer Stack Pointer to Index X
@@ -1159,7 +1191,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		TSX			BA	1		2
 	*/
-	lookup[0xBA] = { "TSX",  &Cpu::impl, &Cpu::TSX, 2, &Cpu::np };
+	lookup[0xBA] = { "TSX",  &Cpu::impl, &Cpu::TSX, 2, false };
 	/* -------------------------------------------------
 	TXA
 		Transfer Index X to Accumulator
@@ -1170,7 +1202,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		TXA			8A	1		2
 	*/
-	lookup[0x8A] = { "TXA",  &Cpu::impl, &Cpu::TXA, 2, &Cpu::np };
+	lookup[0x8A] = { "TXA",  &Cpu::impl, &Cpu::TXA, 2, false };
 	/* -------------------------------------------------
 	TXS
 		Transfer Index X to Stack Register
@@ -1181,7 +1213,7 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		TXS			9A	1		2
 	*/
-	lookup[0x9A] = { "TXS",  &Cpu::impl, &Cpu::TXS, 2, &Cpu::np };
+	lookup[0x9A] = { "TXS",  &Cpu::impl, &Cpu::TXS, 2, false };
 	/* -------------------------------------------------
 	TYA
 		Transfer Index Y to Accumulator
@@ -1192,11 +1224,13 @@ void Cpu::initInstructions()
 		addressing	assembler	opc	bytes	cycles
 		implied		TYA			98	1		2
 	*/
-	lookup[0x98] = { "TYA",  &Cpu::impl, &Cpu::TYA, 2, &Cpu::np };
+	lookup[0x98] = { "TYA",  &Cpu::impl, &Cpu::TYA, 2, false };
 
 }
 void Cpu::execInstruction(Instruction instruction)
 {
+	penalty = 0;
 	(this->*instruction.addr)();
 	(this->*instruction.opc)();
+	if(instruction.penalty) cycleCounter += penalty;
 }

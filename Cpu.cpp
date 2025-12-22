@@ -61,13 +61,19 @@ void Cpu::reset()
 void Cpu::cycle()
 {
 	// read the opcode at PC
-	uint8_t opcode = bus.read(PC);
-	// increment for next instruction
-	PC++;
-	uint16_t address;
-
-	// EXEC INSTRUCTION
-
+	uint8_t opcode = fetchByte();
+	// lookup instruction to run
+	Instruction inst = lookup[opcode];
+	// run instruction
+	execInstruction(inst);
+}
+void Cpu::execInstruction(Instruction instruction)
+{
+	penalty = 0;
+	cycleCounter += instruction.cycles;
+	(this->*instruction.addr)();
+	(this->*instruction.opc)();
+	if (instruction.penalty) cycleCounter += penalty;
 }
 	
 // helper functions
@@ -140,8 +146,8 @@ void Cpu::imm() { currentAddress = fetchByte(); }
 void Cpu::impl() {};
 void Cpu::rel() 
 { 
-	branch();
 	currentAddress = PC + int8_t(fetchByte());
+	branch();
 }
 void Cpu::ind()
 {
@@ -401,8 +407,8 @@ void Cpu::initInstructions()
 	lookup[0x6D] = { "ADC",  &Cpu::abs,  &Cpu::ADC, 4, false };
 	lookup[0x7D] = { "ADC",  &Cpu::absX, &Cpu::ADC, 4, true  };
 	lookup[0x79] = { "ADC",  &Cpu::absY, &Cpu::ADC, 4, true  };
-	lookup[0x61] = { "ADC",  &Cpu::Xind, &Cpu::ADC, 6, true  };
-	lookup[0x71] = { "ADC",  &Cpu::indY, &Cpu::ADC, 5, false };
+	lookup[0x61] = { "ADC",  &Cpu::Xind, &Cpu::ADC, 6, false };
+	lookup[0x71] = { "ADC",  &Cpu::indY, &Cpu::ADC, 5, true  };
 	/* -------------------------------------------------
 	AND
 		AND Memory with Accumulator
@@ -1214,12 +1220,4 @@ void Cpu::initInstructions()
 	*/
 	lookup[0x98] = { "TYA",  &Cpu::impl, &Cpu::TYA, 2, false };
 
-}
-void Cpu::execInstruction(Instruction instruction)
-{
-	penalty = 0;
-	cycleCounter += instruction.cycles;
-	(this->*instruction.addr)();
-	(this->*instruction.opc)();
-	if(instruction.penalty) cycleCounter += penalty;
 }

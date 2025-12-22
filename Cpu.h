@@ -69,7 +69,7 @@ public:
 		if (condition) setFlag(flag); else clearFlag(flag);
 	}
 
-	// reads the programcounter and automatically increments it
+	// core functions
 	uint8_t fetchByte();
 	uint8_t pull();
 	uint16_t pullWord();
@@ -85,8 +85,8 @@ public:
 	void absoluteIndexed(uint8_t& reg);
 
 	// Penalty Functions
-	void crossBound(const uint16_t& baseAddress, const uint16_t& finalAddress),
-		branch();
+	void crossBound(const uint16_t& baseAddress, const uint16_t& finalAddress); // <--- Semicolon
+	void branch();
 
 	// --- Address Modes ---
 	void acc(), abs(), absX(), absY(),

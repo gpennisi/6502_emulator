@@ -8,6 +8,10 @@ Cpu::Cpu(Bus& b) : bus(b)
 	
 }
 
+// declare lookup
+Cpu::Instruction Cpu::lookup[0x100];
+
+// core functions
 uint8_t Cpu::fetchByte()
 {
 	const uint8_t fetch = bus.read(PC);
@@ -186,8 +190,8 @@ void Cpu::zpg()
 	// get the page position
 	currentAddress = fetchByte();
 }
-void Cpu::zpgX() { Cpu::zpg(); (currentAddress + X) & 0xFF; }
-void Cpu::zpgY() { Cpu::zpg(); (currentAddress + Y) & 0xFF; }
+void Cpu::zpgX() { Cpu::zpg(); currentAddress = (currentAddress + X) & 0xFF; }
+void Cpu::zpgY() { Cpu::zpg(); currentAddress = (currentAddress + Y) & 0xFF; }
 
 void Cpu::ADC() 
 { 
@@ -204,22 +208,6 @@ void Cpu::ADC()
 void Cpu::AND() 
 { 
 	logic([value = bus.read(currentAddress)](uint8_t& A) { A &= value; }); 
-}
-void Cpu::ASL()
-{
-	uint8_t value = isAccumulatorMode ? A : bus.read(currentAddress);
-	uint8_t shift_value = (uint8_t)(value << 1);
-	if(isAccumulatorMode)
-	{
-		A = shift_value;
-		isAccumulatorMode = false;
-	}
-	else { bus.write(shift_value, currentAddress); }
-	
-	updateFlag(N, shift_value & 0x80);
-	updateFlag(Z, shift_value == 0);
-	updateFlag(C, value & 0x80);
-
 }
 void Cpu::ASL() { shift(0x80, [](uint8_t v) { return v << 1; }); }
 
@@ -1230,6 +1218,7 @@ void Cpu::initInstructions()
 void Cpu::execInstruction(Instruction instruction)
 {
 	penalty = 0;
+	cycleCounter += instruction.cycles;
 	(this->*instruction.addr)();
 	(this->*instruction.opc)();
 	if(instruction.penalty) cycleCounter += penalty;

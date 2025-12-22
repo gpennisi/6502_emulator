@@ -59,12 +59,10 @@ void Cpu::reset()
 	PC = (high_byte << 8) | low_byte;
 }
 void Cpu::cycle()
-{
-	// read the opcode at PC
-	uint8_t opcode = fetchByte();
-	// lookup instruction to run
-	Instruction inst = lookup[opcode];
-	// run instruction
+{	
+	// fetch instruction
+	Instruction inst = lookup[fetchByte()];
+	// execute instruction
 	execInstruction(inst);
 }
 void Cpu::execInstruction(Instruction instruction)

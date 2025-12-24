@@ -12,3 +12,5 @@ http://www.6502.org/users/obelisk/6502/instructions.html
 https://www.masswerk.at/6502/6502_instruction_set.html
 
 Looking at other implementation like https://github.com/gianlucag/mos6502 has been incredibly useful.
+
+I have also been testing my results against https://skilldrick.github.io/easy6502/, which is an amazing resource to understand how assembly language works in 6502.

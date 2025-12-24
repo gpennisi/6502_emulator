@@ -1,12 +1,11 @@
+//Cpu.cpp
+
 #include "Cpu.h"
 #include "Bus.h"
 #include <stdexcept>
 #include <string>
+#include <iterator>
 
-Cpu::Cpu(Bus& b) : bus(b)
-{
-	
-}
 
 // declare lookup
 Cpu::Instruction Cpu::lookup[0x100];
@@ -46,7 +45,8 @@ void Cpu::reset()
 	Y = 0x0;
 	// stack pointer addresses $0100-$01FF
 	S = 0xFF;
-	status_reg = 0x24; // *** REVISE
+	SR = 0x24; 
+	isAccumulatorMode = false;
 	// read the two 16-bit addresses that return
 	// the two bytes that point to the address in memory
 	// where the Program Counter starts from
@@ -57,6 +57,8 @@ void Cpu::reset()
 	const uint8_t low_byte = bus.read(0xFFFC);
 	const uint8_t high_byte = bus.read(0xFFFD);
 	PC = (high_byte << 8) | low_byte;
+
+
 }
 void Cpu::cycle()
 {	
@@ -73,7 +75,19 @@ void Cpu::execInstruction(Instruction instruction)
 	(this->*instruction.opc)();
 	if (instruction.penalty) cycleCounter += penalty;
 }
-	
+void Cpu::irq() 
+{
+	if (!getFlag(I)) {
+		interrupt(0xFFFE, false);
+		cycleCounter += 7;
+	}
+}
+void Cpu::nmi() 
+{
+	interrupt(0xFFFA, false);
+	cycleCounter += 7;
+}
+
 // helper functions
 uint16_t Cpu::arithmetic(const uint16_t& value, std::function<uint16_t(uint16_t)> operation)
 {
@@ -116,6 +130,22 @@ void Cpu::absoluteIndexed(uint8_t& reg)
 	crossBound(currentAddress, finalAddress);
 	currentAddress = finalAddress;
 }
+void Cpu::interrupt(uint16_t address, bool isSoftware)
+{
+	pushWord(PC);
+	// Bit 5 (U) is always pushed as 1.
+	// Bit 4 (B) is 1 if software (BRK), 0 if hardware (IRQ/NMI).
+	uint8_t statusToPush = SR | 0x20;
+	if (isSoftware) statusToPush |= 0x10;
+	else statusToPush &= ~0x10;
+
+	push(statusToPush);
+	setFlag(I);
+
+	uint8_t ll = bus.read(address);
+	uint8_t hh = bus.read(address + 1);
+	PC = (hh << 8) | ll;
+}
 
 // Penalty Functions
 void Cpu::crossBound(const uint16_t& baseAddress, const uint16_t& finalAddress )
@@ -140,11 +170,18 @@ void Cpu::abs()
 }
 void Cpu::absX() { absoluteIndexed(X); }
 void Cpu::absY() { absoluteIndexed(Y); }
-void Cpu::imm() { currentAddress = fetchByte(); }
+void Cpu::imm()
+{  
+	currentAddress = PC;
+	PC++;
+}
 void Cpu::impl() {};
 void Cpu::rel() 
 { 
-	currentAddress = PC + int8_t(fetchByte());
+	// fetch the offset and increment PC first
+	int8_t offset = fetchByte();
+	// add to the incremented PC
+	currentAddress = PC + offset;
 	branch();
 }
 void Cpu::ind()
@@ -215,14 +252,21 @@ void Cpu::AND()
 }
 void Cpu::ASL() { shift(0x80, [](uint8_t v) { return v << 1; }); }
 
-void Cpu::BCC() 
-{ 
-	if (!getFlag(C)) { 
-		PC = currentAddress; 
-	} 
+void Cpu::BCC()
+{
+	if (!getFlag(C)) { PC = currentAddress; }
+	else { penalty = 0; }
 }
-void Cpu::BCS() { if (getFlag(C)) { PC = currentAddress; } }
-void Cpu::BEQ() { if (getFlag(Z)) { PC = currentAddress; } }
+void Cpu::BCS()
+{
+	if (getFlag(C)) { PC = currentAddress; }
+	else { penalty = 0; }
+}
+void Cpu::BEQ()
+{
+	if (getFlag(Z)) { PC = currentAddress; }
+	else { penalty = 0; }
+}
 void Cpu::BIT()
 {
 	uint8_t value = bus.read(currentAddress);
@@ -230,24 +274,36 @@ void Cpu::BIT()
 	updateFlag(V, value & 0x40);
 	updateFlag(Z, (value & A) == 0);
 }
-void Cpu::BMI() { if (getFlag(N)) { PC = currentAddress; } }
-void Cpu::BNE() { if (!getFlag(Z)) { PC = currentAddress; } }
-void Cpu::BPL() { if (!getFlag(N)) { PC = currentAddress; } }
-void Cpu::BRK()
+void Cpu::BMI()
 {
-	// https://www.nesdev.org/the%20'B'%20flag%20&%20BRK%20instruction.txt
-	// we don't read but just increment because of padding byte(?)
-	pushWord(++PC);
-	// push with B(4) and U(5) set
-	push(status_reg | 0x30); 
-	setFlag(I);
-	uint16_t ll = bus.read(0xFFFE);
-	uint16_t hh = bus.read(0xFFFF);
-	PC = (hh << 8) | ll;
-	// TO REVISE
+	if (getFlag(N)) { PC = currentAddress; }
+	else { penalty = 0; }
 }
-void Cpu::BVC() { if (!getFlag(V)) { PC = currentAddress; } }
-void Cpu::BVS() { if (getFlag(V)) { PC = currentAddress; } }
+void Cpu::BNE()
+{
+	if (!getFlag(Z)) { PC = currentAddress; }
+	else { penalty = 0; }
+}
+void Cpu::BPL()
+{
+	if (!getFlag(N)) { PC = currentAddress; }
+	else { penalty = 0; }
+}
+void Cpu::BRK() {
+	// https://www.nesdev.org/the%20'B'%20flag%20&%20BRK%20instruction.txt
+	PC++; // BRK is a 2-byte instruction; skip the padding byte
+	interrupt(0xFFFE, true);
+}
+void Cpu::BVC()
+{
+	if (!getFlag(V)) { PC = currentAddress; }
+	else { penalty = 0; }
+}
+void Cpu::BVS()
+{
+	if (getFlag(V)) { PC = currentAddress; }
+	else { penalty = 0; }
+}
 
 void Cpu::CLC() { clearFlag(C); }
 void Cpu::CLD() { clearFlag(D); }
@@ -314,11 +370,11 @@ void Cpu::ORA()
 void Cpu::NOP() {}
 
 void Cpu::PHA() { push(A); }
-void Cpu::PHP() { push(status_reg | 0x20 | 0x10); }
+void Cpu::PHP() { push(SR | 0x20 | 0x10); }
 void Cpu::PLA() { load(A, pull()); }
 void Cpu::PLP() 
 { 
-	status_reg = pull() | (status_reg & 0x20) | (status_reg & 0x10); 
+	SR = pull() | (SR & 0x20) | (SR & 0x10); 
 }
 
 void Cpu::ROL() {
@@ -334,7 +390,7 @@ void Cpu::ROR() {
 void Cpu::RTI() 
 {
 	// pull ignoring bit 4 and 5 11001111
-	status_reg = pull() & 0xCF;
+	SR = pull() & 0xCF;
 	/*
 	from documentation:
 	'The status register is pulled with the break flag
@@ -380,6 +436,11 @@ void Cpu::TYA() { load(A, Y); }
 
 void Cpu::initInstructions()
 {
+	// tmp fill up of entries for missing insturctions
+	for (int i = 0; i < std::size(lookup); i++) {
+		lookup[i] = { "XXX", &Cpu::impl, &Cpu::NOP, 2, false };
+	}
+
 	// https://www.masswerk.at/6502/6502_instruction_set.html#modes
 	//     hex      memonic	  addressing    opc	 cycles  penalty
 	/* -------------------------------------------------

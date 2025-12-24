@@ -1,7 +1,12 @@
+//Cpu.h
+ 
 #pragma once
 #include <stdint.h>
 #include <functional>
+#include <string>
 #include "Bus.h"
+#include <iostream>
+
 class Cpu
 {
 public:
@@ -23,7 +28,7 @@ private:
 	uint8_t X;
 	uint8_t Y;
 	uint8_t S;
-	uint8_t status_reg;
+	uint8_t SR;
 	uint16_t PC;
 
 	Bus& bus;
@@ -61,12 +66,39 @@ public:
 	void execInstruction(Instruction inst);
 
 	// flag manipulation
-	void setFlag(P flag) { status_reg = status_reg | flag; };
-	void clearFlag(P flag) {status_reg = status_reg & (~flag); };
-	bool getFlag(P flag) { return status_reg & flag; }
+	void setFlag(P flag) { SR = SR | flag; };
+	void clearFlag(P flag) {SR = SR & (~flag); };
+	bool getFlag(P flag) { return SR & flag; }
 	void updateFlag(P flag, bool condition)
 	{
 		if (condition) setFlag(flag); else clearFlag(flag);
+	}
+
+	// register getters
+	const uint8_t getRegA() { return A; }
+	const uint8_t getRegX() { return X; }
+	const uint8_t getRegY() { return Y; }
+	const uint8_t getRegS() { return S; }
+	const uint8_t getSR() { return SR; }
+	const uint16_t getPC() { return PC; }
+
+	// display functions
+	void printCpuState() {
+		std::cout << "\nPC: " << std::hex << (int)getPC() << "\n "
+			<< "A: " << (int)getRegA() << "\n "
+			<< "X: " << (int)getRegX() << "\n "
+			<< "Y: " << (int)getRegY() << "\n "
+			<< "S: " << (int)getRegS() << "\n "
+			<< "N V U B D I Z C" << "\n "
+			<< getFlag(N) << " " 
+			<< getFlag(V) << " "
+			<< getFlag(U) << " " 
+			<< getFlag(B) << " "  
+			<< getFlag(D) << " " 
+			<< getFlag(I) << " "  
+			<< getFlag(Z) << " "  
+			<< getFlag(C) << " "
+			<< std::endl;
 	}
 
 	// core functions
@@ -75,6 +107,8 @@ public:
 	uint16_t pullWord();
 	void push(const uint8_t& byte);
 	void pushWord(const uint16_t& word);
+	void irq();
+	void nmi();
 
 	// helper functions
 	uint16_t arithmetic(const uint16_t& value, std::function<uint16_t(uint16_t)> operation);
@@ -83,6 +117,7 @@ public:
 	void logic(std::function<void(uint8_t&)> operation);
 	void shift(const uint8_t& mask, std::function<uint8_t(uint8_t)> operation);
 	void absoluteIndexed(uint8_t& reg);
+	void interrupt(uint16_t address, bool isSoftware);
 
 	// Penalty Functions
 	void crossBound(const uint16_t& baseAddress, const uint16_t& finalAddress); // <--- Semicolon

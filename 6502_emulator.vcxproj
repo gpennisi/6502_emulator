@@ -127,8 +127,8 @@
     <ClInclude Include="Cpu.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Bus.cpp" />
     <ClCompile Include="Cpu.cpp" />
+    <ClCompile Include="main.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

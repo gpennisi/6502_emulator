@@ -58,17 +58,22 @@ void Cpu::reset()
 	const uint8_t high_byte = bus.read(0xFFFD);
 	PC = (high_byte << 8) | low_byte;
 
-
 }
-void Cpu::cycle()
+void Cpu::cycle(bool debug)
 {	
 	// fetch instruction
 	Instruction inst = lookup[fetchByte()];
+	if (debug) { std::cout << inst.inst << std::endl; }
 	// execute instruction
 	execInstruction(inst);
 }
 void Cpu::execInstruction(Instruction instruction)
 {
+	if (instruction.inst == "XXX") 
+	{
+		std::cerr << "[CPU Error] Illegal Instruction not supported " << std::endl;
+		exit(1);
+	}
 	penalty = 0;
 	cycleCounter += instruction.cycles;
 	(this->*instruction.addr)();
@@ -115,13 +120,18 @@ void Cpu::logic(std::function<void(uint8_t&)> operation)
 	updateFlag(N, A & 0x80);
 	updateFlag(Z, A == 0);
 }
-void Cpu::shift(const uint8_t& mask, std::function<uint8_t(uint8_t)> operation)
+uint8_t Cpu::shift(const uint8_t& mask, std::function<uint8_t(uint8_t)> operation)
 {
 	uint8_t value = isAccumulatorMode ? A : bus.read(currentAddress);
 	updateFlag(C, value & mask);
-	uint8_t result = arithmetic(value, operation);
+
+	uint8_t result = (uint8_t)arithmetic(value, [&](uint16_t v) {
+		return (uint16_t)operation((uint8_t)v);
+		});
+
 	if (isAccumulatorMode) { A = result; isAccumulatorMode = false; }
 	else { bus.write(result, currentAddress); }
+	return result;
 }
 void Cpu::absoluteIndexed(uint8_t& reg)
 {
@@ -244,7 +254,7 @@ void Cpu::ADC()
 		});
 	updateFlag(V, ((A ^ uint8_t(result)) & ~(A ^ addend)) & 0x80);
 	updateFlag(C, result > 0xFF);
-	A = result;
+	A = (uint8_t)result;
 }
 void Cpu::AND() 
 { 
@@ -432,6 +442,140 @@ void Cpu::TSX() { load(X, S); }
 void Cpu::TXA() { load(A, X); }
 void Cpu::TXS() { S = X; }
 void Cpu::TYA() { load(A, Y); }
+
+//Illegal opcs
+void Cpu::ALR()
+{
+	A &= bus.read(currentAddress);
+	updateFlag(C, A & 0x01);
+	A >>= 1;
+	updateFlag(N, A & 0x80);
+	updateFlag(Z, A == 0);
+}
+void Cpu::ANC()
+{
+	AND();
+	updateFlag(C, A & 0x80);
+}
+void Cpu::ANE()
+{
+	logic([value = X & bus.read(currentAddress)](uint8_t& A) { A &= value; });
+}
+void Cpu::ARR()
+{
+	A = ( (A & bus.read(currentAddress))  >> 1) | 
+		(getFlag(C) ? 0x80 : 0x00);
+
+	updateFlag(N, A & 0x80);
+	updateFlag(Z, A == 0);
+	updateFlag(C, A & 0x40);
+	updateFlag(V, ((A >> 6) ^ (A >> 5)) & 1);
+}
+
+void Cpu::DCP()
+{
+	uint8_t value = bus.read(currentAddress) - 1;
+	bus.write(value, currentAddress);
+	compare(A, value);
+}
+
+void Cpu::ISC()
+{
+	uint8_t value = bus.read(currentAddress) + 1;
+	bus.write(value, currentAddress);
+
+	uint16_t result = arithmetic(A, [value, C = getFlag(C)](uint16_t v) {
+		return uint16_t(v) - uint16_t(value) - (C ? 0 : 1);
+		});
+	updateFlag(V, ((A ^ value) & (A ^ uint8_t(result))) & 0x80);
+	updateFlag(C, result < 0x100);
+	A = uint8_t(result);
+}
+void Cpu::LAS()
+{
+	logic([value = bus.read(currentAddress) & S](uint8_t& A) { A &= value; });
+	X = S = A;
+}
+void Cpu::LAX()
+{
+	LDA();
+	TAX();
+}
+void Cpu::LXA()
+{
+	logic([value = bus.read(currentAddress) ](uint8_t& A) { A &= value; });
+	X = A;
+}
+
+void Cpu::RLA()
+{
+	uint8_t value = shift(0x80, [this](uint8_t v) {
+		return (v << 1) | (getFlag(C) ? 0x01 : 0x00);
+		});
+	logic( [value = value](uint8_t& A) { A &= value; } );
+
+}
+void Cpu::RRA()
+{
+	uint8_t value = shift(0x01, [this](uint8_t v) {
+		return (v >> 1) | (getFlag(C) ? 0x80 : 0x00);
+		});
+	logic([value = value](uint8_t& A) { A &= value; });
+}
+
+void Cpu::SAX() { bus.write(currentAddress, A & X); }
+void Cpu::SBX()
+{
+	uint8_t value = bus.read(currentAddress);
+	X &= A;
+	uint8_t result = X - value;
+	updateFlag(C, X >= value);
+	updateFlag(Z, result == 0);
+	updateFlag(N, result & 0x80);
+	X = result;
+}
+void Cpu::SHA()
+{
+	bus.write( 
+		A & X & (uint8_t(currentAddress >> 8) + 1),
+		currentAddress
+	);
+}
+void Cpu::SHX()
+{
+	bus.write(
+		X & (uint8_t(currentAddress >> 8) + 1),
+		currentAddress
+	);
+}
+void Cpu::SHY()
+{
+	bus.write(
+		Y & (uint8_t(currentAddress >> 8) + 1),
+		currentAddress
+	);
+}
+void Cpu::SLO()
+{
+	uint8_t value = shift(0x80, [](uint8_t v) { return v << 1; });
+	logic( [value = value ] (uint8_t& A)  { A |= value; } );
+}
+void Cpu::SRE()
+{
+	uint8_t value = shift(0x01, [](uint8_t v) { return v >> 1; });
+	logic([value = value](uint8_t& A) { A |= value; });
+}
+
+void Cpu::TAS()
+{
+	push(A & X);
+	SHA();
+}
+
+void Cpu::JAM()
+{
+	PC--;
+}
 
 
 void Cpu::initInstructions()
@@ -1278,5 +1422,468 @@ void Cpu::initInstructions()
 		implied		TYA			98	1		2
 	*/
 	lookup[0x98] = { "TYA",  &Cpu::impl, &Cpu::TYA, 2, false };
+	
 
+
+
+
+
+
+
+
+
+
+
+	// ----------- Illegal Codes -----------
+	/* -------------------------------------------------
+	ALR (ASR)
+	AND oper + LSR
+
+	A AND oper, 0 -> [76543210] -> C
+
+		NZCIDV
+		+++---
+	addressing	assembler	opc	bytes	cycles	
+	immediate	ALR #oper	4B	2		2  
+	*/
+	lookup[0x4B] = { "ALR",  &Cpu::imm, &Cpu::ALR, 2, false };
+	/* -------------------------------------------------
+	ANC
+		AND oper + set C as ASL
+
+		A AND oper, bit(7)->C
+
+		NZCIDV
+		+++---
+		addressing	assembler	opc	bytes	cycles
+		immediate	ANC #oper	0B	2		2
+		immediate	ANC #oper	2B	2		2
+	*/
+	lookup[0x0B] = { "ANC",  &Cpu::imm, &Cpu::ANC, 2, false };
+	lookup[0x2B] = { "ANC",  &Cpu::imm, &Cpu::ANC, 2, false };
+	/* -------------------------------------------------
+	ANE(XAA)
+		* OR X + AND oper
+
+		Highly unstable, do not use.
+
+		A base value in A is determined based on the contets of A and a constant, which may be 
+		typically $00, $ff, $ee, etc.The value of this constant depends on temerature, 
+		the chip series, and maybe other factors, as well.
+		In order to eliminate these uncertaincies from the equation, 
+		use either 0 as the operand or a value of $FF in the accumulator.
+
+		(A OR CONST) AND X AND oper->A
+
+		NZCIDV
+		+++---
+		addressing	assembler	opc	bytes	cycles
+		immediate	ANE #oper	8B	2		2  
+	*/
+	lookup[0x8B] = { "ANE",  &Cpu::imm, &Cpu::ANE, 2, false };
+	/* -------------------------------------------------
+	ARR
+		AND oper + ROR
+
+		This operation involves the adder :
+		V - flag is set according to(A AND oper) + oper
+		The carry is not set, but bit 7 (sign)is exchanged with the carry
+
+		A AND oper, C ->[76543210]->C
+
+		NZCIDV
+		+++--+
+		addressing	assembler	opc	bytes	cycles
+		immediate	ARR #oper	6B	2		2
+	*/
+	lookup[0x6B] = { "ARR",  &Cpu::imm, &Cpu::ARR, 2, false };
+	/* -------------------------------------------------
+	DCP(DCM)
+		DEC oper + CMP oper
+
+		M - 1->M, A - M
+
+		Decrements the operand and then compares the result to the accumulator.
+
+		NZCIDV
+		+++---
+		addressing		assembler		opc	bytes	cycles
+		zeropage		DCP oper		C7	2		5
+		zeropage, X		DCP oper, X		D7	2		6
+		absolute		DCP oper		CF	3		6
+		absolute, X		DCP oper, X		DF	3		7
+		absolute, Y		DCP oper, Y		DB	3		7
+		(indirect, X)	DCP(oper, X)	C3	2		8
+		(indirect), Y	DCP(oper), Y	D3	2		8
+	*/
+	lookup[0xC7] = { "DCP",  &Cpu::zpg,  &Cpu::DCP, 5, false };
+	lookup[0xD7] = { "DCP",  &Cpu::zpgX, &Cpu::DCP, 6, false };
+	lookup[0xCF] = { "DCP",  &Cpu::abs,  &Cpu::DCP, 6, false };
+	lookup[0xDF] = { "DCP",  &Cpu::absX, &Cpu::DCP, 7, false };
+	lookup[0xDB] = { "DCP",  &Cpu::absY, &Cpu::DCP, 7, false };
+	lookup[0xC3] = { "DCP",  &Cpu::Xind, &Cpu::DCP, 8, false };
+	lookup[0xD3] = { "DCP",  &Cpu::indY, &Cpu::DCP, 8, false };
+	/* -------------------------------------------------
+	ISC(ISB, INS)
+		INC oper + SBC oper
+
+		M + 1->M, A - M - ~C->A
+
+		NZCIDV
+		+++--+
+		addressing		assembler		opc	bytes	cycles
+		zeropage		ISC oper		E7	2		5
+		zeropage, X		ISC oper, X		F7	2		6
+		absolute		ISC oper		EF	3		6
+		absolute, X		ISC oper, X		FF	3		7
+		absolute, Y		ISC oper, Y		FB	3		7
+		(indirect, X)	ISC(oper, X)	E3	2		8
+		(indirect), Y	ISC(oper), Y	F3	2		8
+	*/
+	lookup[0xE7] = { "ISC",  &Cpu::zpg,  &Cpu::ISC, 5, false };
+	lookup[0xF7] = { "ISC",  &Cpu::zpgX, &Cpu::ISC, 6, false };
+	lookup[0xEF] = { "ISC",  &Cpu::abs,  &Cpu::ISC, 6, false };
+	lookup[0xFF] = { "ISC",  &Cpu::absX, &Cpu::ISC, 7, false };
+	lookup[0xFB] = { "ISC",  &Cpu::absY, &Cpu::ISC, 7, false };
+	lookup[0xE3] = { "ISC",  &Cpu::Xind, &Cpu::ISC, 8, false };
+	lookup[0xF3] = { "ISC",  &Cpu::indY, &Cpu::ISC, 8, false };
+	/* -------------------------------------------------
+	LAS(LAR)
+		LDA / TSX oper
+
+		M AND SP->A, X, SP
+
+		NZCIDV
+		++----
+		addressing		assembler		opc	bytes	cycles
+		absolute, Y		LAS oper, Y		BB	3		4 *
+	*/
+	lookup[0xBB] = { "LAS",  &Cpu::absY, &Cpu::LAS, 4, true };
+	/* -------------------------------------------------
+	LAX
+		LDA oper + LDX oper
+
+		M->A->X
+
+		NZCIDV
+		++----
+		addressing		assembler		opc	bytes	cycles
+		zeropage		LAX oper		A7	2		3
+		zeropage, Y		LAX oper, Y		B7	2		4
+		absolute		LAX oper		AF	3		4
+		absolute, Y		LAX oper, Y		BF	3		4 *
+		(indirect, X)	LAX(oper, X)	A3	2		6
+		(indirect), Y	LAX(oper), Y	B3	2		5 *
+	*/
+	lookup[0xA7] = { "LAX",  &Cpu::zpg,  &Cpu::LAX, 3, false };
+	lookup[0xB7] = { "LAX",  &Cpu::zpgY, &Cpu::LAX, 4, false };
+	lookup[0xAF] = { "LAX",  &Cpu::abs,  &Cpu::LAX, 4, false };
+	lookup[0xBF] = { "LAX",  &Cpu::absY, &Cpu::LAX, 4, true };
+	lookup[0xA3] = { "LAX",  &Cpu::Xind, &Cpu::LAX, 6, false };
+	lookup[0xB3] = { "LAX",  &Cpu::indY, &Cpu::LAX, 5, true };
+	/* -------------------------------------------------
+	LXA(LAX immediate)
+		Store* AND oper in A and X
+
+		Highly unstable, involves a 'magic' constant, see ANE
+
+		(A OR CONST) AND oper->A->X
+
+		NZCIDV
+		++----
+		addressing	assembler	opc	bytes	cycles
+		immediate	LXA #oper	AB	2		2
+	*/
+	lookup[0xAB] = { "LXA",  &Cpu::imm, &Cpu::LXA, 2, false };
+	/* -------------------------------------------------
+	RLA
+		ROL oper + AND oper
+
+		M = C < -[76543210] < -C, A AND M->A
+
+		NZCIDV
+		+++---
+		addressing		assembler		opc		bytes	cycles
+		zeropage		RLA oper		27		2		5
+		zeropage, X		RLA oper, X		37		2		6
+		absolute		RLA oper		2F		3		6
+		absolute, X		RLA oper, X		3F		3		7
+		absolute, Y		RLA oper, Y		3B		3		7
+		(indirect, X)	RLA(oper, X)	23		2		8
+		(indirect), Y	RLA(oper), Y	33		2		8
+	*/
+	lookup[0x27] = { "RLA",  &Cpu::zpg,  &Cpu::RLA, 5, false };
+	lookup[0x37] = { "RLA",  &Cpu::zpgX, &Cpu::RLA, 6, false };
+	lookup[0x2F] = { "RLA",  &Cpu::abs,  &Cpu::RLA, 6, false };
+	lookup[0x3F] = { "RLA",  &Cpu::absX, &Cpu::RLA, 7, false };
+	lookup[0x3B] = { "RLA",  &Cpu::absY, &Cpu::RLA, 7, false };
+	lookup[0x23] = { "RLA",  &Cpu::Xind, &Cpu::RLA, 8, false };
+	lookup[0x33] = { "RLA",  &Cpu::indY, &Cpu::RLA, 8, false };
+	/* -------------------------------------------------
+	RRA
+		ROR oper + AND oper
+
+		M = C < -[76543210] < -C, A AND M->A
+
+		NZCIDV
+		+++--+
+		addressing		assembler		opc	bytes	cycles
+		zeropage		RRA oper		67	2		5
+		zeropage,X		RRA oper,X		77	2		6
+		absolute		RRA oper		6F	3		6
+		absolute,X		RRA oper,X		7F	3		7
+		absolute,Y		RRA oper,Y		7B	3		7
+		(indirect,X)	RRA (oper,X)	63	2		8
+		(indirect),Y	RRA (oper),Y	73	2		8
+	*/
+	lookup[0x67] = { "RRA",  &Cpu::zpg,  &Cpu::RRA, 5, false };
+	lookup[0x77] = { "RRA",  &Cpu::zpgX, &Cpu::RRA, 6, false };
+	lookup[0x6F] = { "RRA",  &Cpu::abs,  &Cpu::RRA, 6, false };
+	lookup[0x7F] = { "RRA",  &Cpu::absX, &Cpu::RRA, 7, false };
+	lookup[0x7B] = { "RRA",  &Cpu::absY, &Cpu::RRA, 7, false };
+	lookup[0x63] = { "RRA",  &Cpu::Xind, &Cpu::RRA, 8, false };
+	lookup[0x73] = { "RRA",  &Cpu::indY, &Cpu::RRA, 8, false };
+	/* -------------------------------------------------
+	SAX(AXS, AAX)
+		A and X are put on the bus at the same time(resulting 
+		effectively in an AND operation) and stored in M
+
+		A AND X->M
+
+		NZCIDV
+		------
+		addressing		assembler		opc	bytes	cycles
+		zeropage		SAX oper		87	2		3
+		zeropage, Y		SAX oper, Y		97	2		4
+		absolute		SAX oper		8F	3		4
+		(indirect, X)	SAX(oper, X)	83	2		6
+	*/
+	lookup[0x87] = { "SAX",  &Cpu::zpg,  &Cpu::SAX, 3, false };
+	lookup[0x97] = { "SAX",  &Cpu::zpgY, &Cpu::SAX, 4, false };
+	lookup[0x8F] = { "SAX",  &Cpu::abs,  &Cpu::SAX, 4, false };
+	lookup[0x83] = { "SAX",  &Cpu::Xind, &Cpu::SAX, 6, false };
+	/* -------------------------------------------------
+	SBX(AXS, SAX)
+		CMP and DEX at once, sets flags like CMP
+
+		(A AND X) - oper->X
+
+		NZCIDV
+		+++---
+		addressing	assembler	opc	bytes	cycles
+		immediate	SBX #oper	CB	2		2
+	*/
+	lookup[0xCB] = { "SBX",  &Cpu::imm,  &Cpu::SBX, 3, false };
+	/* -------------------------------------------------
+	SHA(AHX, AXA)
+		Stores A AND X AND(high - byte of addr. + 1) at addr.
+
+		unstable: sometimes 'AND (H+1)' is dropped, 
+		page boundary crossings may not work(with the high - byte 
+		of the value used as the high - byte of the address)
+
+		A AND X AND(H + 1)->M
+
+		NZCIDV
+		------
+		addressing		assembler		opc	bytes	cycles
+		absolute, Y		SHA oper, Y		9F	3		5  
+		(indirect), Y	SHA(oper), Y	93	2		6
+	*/
+	lookup[0x9F] = { "SHA",  &Cpu::absY,  &Cpu::SHA, 5, false };
+	lookup[0x93] = { "SHA",  &Cpu::indY,  &Cpu::SHA, 6, false };
+	/* -------------------------------------------------
+	SHX(A11, SXA, XAS)
+		Stores X AND(high - byte of addr. + 1) at addr.
+
+		unstable: sometimes 'AND (H+1)' is dropped, 
+		page boundary crossings may not work(with the high - byte 
+		of the value used as the high - byte of the address)
+
+		X AND(H + 1)->M
+
+		NZCIDV
+		------
+		addressing	assembler	opc	bytes	cycles
+		absolute, Y	SHX oper, Y	9E	3		5
+	*/
+	lookup[0x9E] = { "SHX",  &Cpu::absY,  &Cpu::SHX, 5, false };
+	/* -------------------------------------------------
+	SHY(A11, SYA, SAY)
+		Stores Y AND(high - byte of addr. + 1) at addr.
+
+		unstable: sometimes 'AND (H+1)' is dropped, 
+		page boundary crossings may not work(with the high - byte 
+		of the value used as the high - byte of the address)
+
+		Y AND(H + 1)->M
+
+		NZCIDV
+		------
+		addressing	assembler	opc	bytes	cycles
+		absolute, X	SHY oper, X	9C	3		5
+	*/
+	lookup[0x9C] = { "SHY",  &Cpu::absX,  &Cpu::SHY, 5, false };
+	/* -------------------------------------------------
+	SLO(ASO)
+		ASL oper + ORA oper
+
+		M = C < -[76543210] < -0, A OR M->A
+
+		NZCIDV
+		+++---
+		addressing		assembler		opc	bytes	cycles
+		zeropage		SLO oper		07	2		5
+		zeropage, X		SLO oper, X		17	2		6
+		absolute		SLO oper		0F	3		6
+		absolute, X		SLO oper, X		1F	3		7
+		absolute, Y		SLO oper, Y		1B	3		7
+		(indirect, X)	SLO(oper, X)	03	2		8
+		(indirect), Y	SLO(oper), Y	13	2		8
+	*/
+	lookup[0x07] = { "SLO",  &Cpu::zpg,  &Cpu::SLO, 5, false };
+	lookup[0x17] = { "SLO",  &Cpu::zpgX, &Cpu::SLO, 6, false };
+	lookup[0x0F] = { "SLO",  &Cpu::abs,  &Cpu::SLO, 6, false };
+	lookup[0x1F] = { "SLO",  &Cpu::absX, &Cpu::SLO, 7, false };
+	lookup[0x1B] = { "SLO",  &Cpu::absY, &Cpu::SLO, 7, false };
+	lookup[0x03] = { "SLO",  &Cpu::Xind, &Cpu::SLO, 8, false };
+	lookup[0x13] = { "SLO",  &Cpu::indY, &Cpu::SLO, 8, false };
+	/* -------------------------------------------------
+	SRE(LSE)
+		LSR oper + EOR oper
+
+		M = 0 ->[76543210]->C, A EOR M->A
+
+		NZCIDV
+		+++---
+		addressing		assembler		opc	bytes	cycles
+		zeropage		SRE oper		47	2		5
+		zeropage, X		SRE oper, X		57	2		6
+		absolute		SRE oper		4F	3		6
+		absolute, X		SRE oper, X		5F	3		7
+		absolute, Y		SRE oper, Y		5B	3		7
+		(indirect, X)	SRE(oper, X)	43	2		8
+		(indirect), Y	SRE(oper), Y	53	2		8
+	*/
+	lookup[0x47] = { "SRE",  &Cpu::zpg,  &Cpu::SRE, 5, false };
+	lookup[0x57] = { "SRE",  &Cpu::zpgX, &Cpu::SRE, 6, false };
+	lookup[0x4F] = { "SRE",  &Cpu::abs,  &Cpu::SRE, 6, false };
+	lookup[0x5F] = { "SRE",  &Cpu::absX, &Cpu::SRE, 7, false };
+	lookup[0x5B] = { "SRE",  &Cpu::absY, &Cpu::SRE, 7, false };
+	lookup[0x43] = { "SRE",  &Cpu::Xind, &Cpu::SRE, 8, false };
+	lookup[0x53] = { "SRE",  &Cpu::indY, &Cpu::SRE, 8, false };
+	/* -------------------------------------------------
+	TAS(XAS, SHS)
+		Puts A AND X in SP and stores A AND X AND(high - byte of addr. + 1) at addr.
+
+		unstable: sometimes 'AND (H+1)' is dropped, 
+		page boundary crossings may not work(with the high - byte 
+		of the value used as the high - byte of the address)
+
+		A AND X->SP, A AND X AND(H + 1)->M
+
+		NZCIDV
+		------
+		addressing	assembler	opc	bytes	cycles
+		absolute, Y	TAS oper, Y	9B	3		5
+	*/
+	lookup[0x9B] = { "TAS",  &Cpu::absY,  &Cpu::TAS, 5, false };
+	/* -------------------------------------------------
+	USBC(SBC)
+		SBC oper + NOP
+
+		effectively same as normal SBC immediate, instr.E9.
+
+		A - M - ~C ->A
+
+		NZCIDV
+		+++--+
+		addressing	assembler	opc	bytes	cycles
+		immediate	USBC #oper	EB	2		2
+	*/
+	lookup[0xEB] = { "USBC",  &Cpu::imm,  &Cpu::SBC, 2, false };
+	/* -------------------------------------------------
+	NOPs(including DOP, TOP)
+		Instructions effecting in 'no operations' in various address modes.
+		Operands are ignored.
+
+		NZCIDV
+		-------
+		opc	addressing	bytes	cycles
+		1A	implied		1		2
+		3A	implied		1		2
+		5A	implied		1		2
+		7A	implied		1		2
+		DA	implied		1		2
+		FA	implied		1		2
+		80	immediate	2		2
+		82	immediate	2		2
+		89	immediate	2		2
+		C2	immediate	2		2
+		E2	immediate	2		2
+		04	zeropage	2		3
+		44	zeropage	2		3
+		64	zeropage	2		3
+		14	zeropage, X	2		4
+		34	zeropage, X	2		4
+		54	zeropage, X	2		4
+		74	zeropage, X	2		4
+		D4	zeropage, X	2		4
+		F4	zeropage, X	2		4
+		0C	absolute	3		4
+		1C	absolute, X	3		4 *
+		3C	absolute, X	3		4 *
+		5C	absolute, X	3		4 *
+		7C	absolute, X	3		4 *
+		DC	absolute, X	3		4 *
+		FC	absolute, X	3		4 *
+	*/
+	lookup[0x1A] = { "NOP", &Cpu::impl, &Cpu::NOP, 2, false };
+	lookup[0x3A] = { "NOP", &Cpu::impl, &Cpu::NOP, 2, false };
+	lookup[0x5A] = { "NOP", &Cpu::impl, &Cpu::NOP, 2, false };
+	lookup[0x7A] = { "NOP", &Cpu::impl, &Cpu::NOP, 2, false };
+	lookup[0xDA] = { "NOP", &Cpu::impl, &Cpu::NOP, 2, false };
+	lookup[0xFA] = { "NOP", &Cpu::impl, &Cpu::NOP, 2, false };
+	lookup[0x80] = { "NOP", &Cpu::imm,  &Cpu::NOP, 2, false };
+	lookup[0x82] = { "NOP", &Cpu::imm,  &Cpu::NOP, 2, false };
+	lookup[0x89] = { "NOP", &Cpu::imm,  &Cpu::NOP, 2, false };
+	lookup[0xC2] = { "NOP", &Cpu::imm,  &Cpu::NOP, 2, false };
+	lookup[0xE2] = { "NOP", &Cpu::imm,  &Cpu::NOP, 2, false };
+	lookup[0x04] = { "NOP", &Cpu::zpg,  &Cpu::NOP, 3, false };
+	lookup[0x44] = { "NOP", &Cpu::zpg,  &Cpu::NOP, 3, false };
+	lookup[0x64] = { "NOP", &Cpu::zpg,  &Cpu::NOP, 3, false };
+	lookup[0x14] = { "NOP", &Cpu::zpgX, &Cpu::NOP, 4, false };
+	lookup[0x34] = { "NOP", &Cpu::zpgX, &Cpu::NOP, 4, false };
+	lookup[0x54] = { "NOP", &Cpu::zpgX, &Cpu::NOP, 4, false };
+	lookup[0x74] = { "NOP", &Cpu::zpgX, &Cpu::NOP, 4, false };
+	lookup[0xD4] = { "NOP", &Cpu::zpgX, &Cpu::NOP, 4, false };
+	lookup[0xF4] = { "NOP", &Cpu::zpgX, &Cpu::NOP, 4, false };
+	lookup[0x0C] = { "NOP", &Cpu::abs,  &Cpu::NOP, 4, false };
+	lookup[0x1C] = { "NOP", &Cpu::absX, &Cpu::NOP, 4, true };
+	lookup[0x3C] = { "NOP", &Cpu::absX, &Cpu::NOP, 4, true };
+	lookup[0x5C] = { "NOP", &Cpu::absX, &Cpu::NOP, 4, true };
+	lookup[0x7C] = { "NOP", &Cpu::absX, &Cpu::NOP, 4, true };
+	lookup[0xDC] = { "NOP", &Cpu::absX, &Cpu::NOP, 4, true };
+	lookup[0xFC] = { "NOP", &Cpu::absX, &Cpu::NOP, 4, true };
+	/* -------------------------------------------------
+	JAM(KIL, HLT)
+		These instructions freeze the CPU.
+
+		The processor will be trapped infinitely in T1 phase with $FF on the data bus.— Reset required.
+
+		Instruction codes : 02, 12, 22, 32, 42, 52, 62, 72, 92, B2, D2, F2
+	*/
+	lookup[0x02] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
+	lookup[0x12] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
+	lookup[0x22] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
+	lookup[0x32] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
+	lookup[0x42] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
+	lookup[0x52] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
+	lookup[0x62] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
+	lookup[0x72] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
+	lookup[0x92] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
+	lookup[0xB2] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
+	lookup[0xD2] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
+	lookup[0xF2] = { "JAM", &Cpu::impl, &Cpu::JAM, 1, true };
 }
+

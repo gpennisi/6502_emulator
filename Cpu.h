@@ -6,11 +6,12 @@
 #include <string>
 #include "Bus.h"
 #include <iostream>
+#include <iomanip> // for hex printing
 
 class Cpu
 {
 public:
-	static enum P
+	enum P
 	{
 		N = 0x80,
 		V = 0x40,
@@ -45,7 +46,7 @@ public:
 	//sets the initial state
 	void reset();
 	//simulate one step of CPU operation
-	void cycle();
+	void cycle(bool debug = false);
 
 
 	// pointer to instruction function
@@ -82,13 +83,15 @@ public:
 	const uint8_t getSR() { return SR; }
 	const uint16_t getPC() { return PC; }
 
+
 	// display functions
 	void printCpuState() {
-		std::cout << "\nPC: " << std::hex << (int)getPC() << "\n "
-			<< "A: " << (int)getRegA() << "\n "
-			<< "X: " << (int)getRegX() << "\n "
-			<< "Y: " << (int)getRegY() << "\n "
-			<< "S: " << (int)getRegS() << "\n "
+		std::cout << std::hex << std::setfill('0') 
+			<< "\nPC: 0x" << std::setw(4) << int(getPC()) << "\n "
+			<< "A: 0x" << std::setw(2) << int(getRegA()) << "\n "
+			<< "X: 0x" << std::setw(2) << int(getRegX()) << "\n "
+			<< "Y: 0x" << std::setw(2) << int(getRegY()) << "\n "
+			<< "S: 0x" << std::setw(2) << int(getRegS()) << "\n "
 			<< "N V U B D I Z C" << "\n "
 			<< getFlag(N) << " " 
 			<< getFlag(V) << " "
@@ -100,6 +103,8 @@ public:
 			<< getFlag(C) << " "
 			<< std::endl;
 	}
+
+
 
 	// core functions
 	uint8_t fetchByte();
@@ -115,7 +120,7 @@ public:
 	void compare(uint8_t reg, const uint8_t& value);
 	void load(uint8_t& reg, const uint8_t& value);
 	void logic(std::function<void(uint8_t&)> operation);
-	void shift(const uint8_t& mask, std::function<uint8_t(uint8_t)> operation);
+	uint8_t shift(const uint8_t& mask, std::function<uint8_t(uint8_t)> operation);
 	void absoluteIndexed(uint8_t& reg);
 	void interrupt(uint16_t address, bool isSoftware);
 
@@ -151,6 +156,10 @@ public:
 	void CMP(), CPX(), CPY();
 	//  System	
 	void BRK(), NOP();
+	// Illegal
+	void ALR(), ANC(), ANE(), ARR(), DCP(), ISC(),
+		LAS(), LAX(), LXA(), RLA(), RRA(), SAX(), SBX(), SHA(),
+		SHX(), SHY(), SLO(), SRE(), TAS(), JAM();
 };
 
 

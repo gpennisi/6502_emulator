@@ -143,13 +143,16 @@ void Cpu::absoluteIndexed(uint8_t& reg)
 void Cpu::interrupt(uint16_t address, bool isSoftware)
 {
 	pushWord(PC);
-	// Bit 5 (U) is always pushed as 1.
-	// Bit 4 (B) is 1 if software (BRK), 0 if hardware (IRQ/NMI).
 	uint8_t statusToPush = SR | 0x20;
-	if (isSoftware) statusToPush |= 0x10;
-	else statusToPush &= ~0x10;
+	if (isSoftware) {
+		statusToPush |= 0x10;
+	}
+	else {
+		statusToPush &= ~0x10;
+	}
 
 	push(statusToPush);
+
 	setFlag(I);
 
 	uint8_t ll = bus.read(address);

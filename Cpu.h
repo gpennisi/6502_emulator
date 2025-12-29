@@ -87,7 +87,7 @@ public:
 	// display functions
 	void printCpuState() {
 		std::cout << std::hex << std::setfill('0') 
-			<< "\nPC: 0x" << std::setw(4) << int(getPC()) << "\n "
+			<< "PC: 0x" << std::setw(4) << int(getPC()) << "\n "
 			<< "A: 0x" << std::setw(2) << int(getRegA()) << "\n "
 			<< "X: 0x" << std::setw(2) << int(getRegX()) << "\n "
 			<< "Y: 0x" << std::setw(2) << int(getRegY()) << "\n "

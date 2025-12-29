@@ -53,6 +53,7 @@ int main()
         0xE9, 0x01,          // SBC #$01
         0x8D, 0x00, 0x01,    // STA $0100
         0x18,                // CLC
+
         0x00                 // BRK  
     };
 
@@ -101,21 +102,23 @@ int main()
         0x00                 // BRK
     };
 
+    std::cout << "-------\nProgram 1" << std::endl;
     execProgram(program1);
     cpu.printCpuState();
     bus.printValueAtMemory(0x0100);
     bus.printValueAtMemory(0x0110);
 
+    std::cout << "\n\n-------\nProgram 2" << std::endl;
     execProgram(program2);
     cpu.printCpuState();
     bus.printValueAtMemory(0x0011);
     bus.printValueAtMemory(0x0012);
 
+    std::cout << "\n\n-------\nProgram 3" << std::endl;
     execProgram(program3);
     cpu.printCpuState();
     bus.printValueAtMemory(0x0200);
     bus.printValueAtMemory(0x0210);
-
 
 
     return 0;

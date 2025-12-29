@@ -15,8 +15,10 @@ Looking at other implementation like https://github.com/gianlucag/mos6502 has be
 
 I have also been testing my results against https://skilldrick.github.io/easy6502/, which is an amazing resource to understand how assembly language works in 6502.
 
-below some comparisons with easy6502, where results are mostly consistent, but it needs more work for flag and cycles consistency.
-![Screenshot 2025-12-24 112450](https://github.com/user-attachments/assets/e47dbd55-ae08-4732-9f4f-436f779f1cfb)
-![Screenshot 2025-12-24 111931](https://github.com/user-attachments/assets/88b8f07d-581e-4636-b51b-d7cdf15813ad)
+below some comparisons with easy6502, where results are mostly consistent, except for the logic with BRK which in my current tests exits the program before advancing the PC.
+
+<img width="1164" height="652" alt="Untitled1" src="https://github.com/user-attachments/assets/4e87e556-e520-434d-bbe0-2dab422d5b06" />
+<img width="1164" height="652" alt="Untitled2" src="https://github.com/user-attachments/assets/7ea630fb-90bc-4495-ae33-d3d93c86d07b" />
+<img width="1164" height="652" alt="Untitled3" src="https://github.com/user-attachments/assets/3de0aee4-83ba-4e79-a779-14c88ce9d6ce" />
 
 

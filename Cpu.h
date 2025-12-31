@@ -7,10 +7,21 @@
 #include "Bus.h"
 #include <iostream>
 #include <iomanip> // for hex printing
+#include <sstream>
 
 class Cpu
 {
-public:
+private:
+	Bus& bus;
+
+	int cycleCounter;
+	uint8_t A;
+	uint8_t X;
+	uint8_t Y;
+	uint8_t S;
+	uint8_t SR;
+	uint16_t PC;
+
 	enum P
 	{
 		N = 0x80,
@@ -23,19 +34,7 @@ public:
 		C = 0x01
 	};
 
-private:
-	int cycleCounter;
-	uint8_t A;
-	uint8_t X;
-	uint8_t Y;
-	uint8_t S;
-	uint8_t SR;
-	uint16_t PC;
-
-	Bus& bus;
-
 	uint16_t currentAddress;
-
 	bool isAccumulatorMode = false;
 	uint8_t penalty = 0;
 
@@ -46,8 +45,7 @@ public:
 	//sets the initial state
 	void reset();
 	//simulate one step of CPU operation
-	void cycle(bool debug = false);
-
+	void cycle();
 
 	// pointer to instruction function
 	using opcFunction = void (Cpu::*)();
@@ -58,13 +56,15 @@ public:
 		std::string inst;
 		addrFunction addr;
 		opcFunction opc;
-		uint8_t cycles;
+		int cycles;
 		bool penalty;
 	};
 	// create a lookup table that can hold 151 + illegal options
 	static Instruction lookup[0x100];
 	void initInstructions();
 	void execInstruction(Instruction inst);
+	// endAddress is uint32_t to wrap around when 0xFFFF+1
+	std::string disassembleInstruction(const uint32_t addr);
 
 	// flag manipulation
 	void setFlag(P flag) { SR = SR | flag; };
@@ -75,36 +75,39 @@ public:
 		if (condition) setFlag(flag); else clearFlag(flag);
 	}
 
-	// register getters
+	// register getters/setters
 	const uint8_t getRegA() { return A; }
 	const uint8_t getRegX() { return X; }
 	const uint8_t getRegY() { return Y; }
 	const uint8_t getRegS() { return S; }
 	const uint8_t getSR() { return SR; }
 	const uint16_t getPC() { return PC; }
+	void setPC(const uint16_t& address) { PC = address; }
 
 
-	// display functions
-	void printCpuState() {
-		std::cout << std::hex << std::setfill('0') 
-			<< "PC: 0x" << std::setw(4) << int(getPC()) << "\n "
-			<< "A: 0x" << std::setw(2) << int(getRegA()) << "\n "
-			<< "X: 0x" << std::setw(2) << int(getRegX()) << "\n "
-			<< "Y: 0x" << std::setw(2) << int(getRegY()) << "\n "
-			<< "S: 0x" << std::setw(2) << int(getRegS()) << "\n "
-			<< "N V U B D I Z C" << "\n "
-			<< getFlag(N) << " " 
-			<< getFlag(V) << " "
-			<< getFlag(U) << " " 
-			<< getFlag(B) << " "  
-			<< getFlag(D) << " " 
-			<< getFlag(I) << " "  
-			<< getFlag(Z) << " "  
-			<< getFlag(C) << " "
-			<< std::endl;
+	std::string cpuState(bool flat = true)
+	{
+		std::string spacer = flat ? " " : "\n ";
+		std::stringstream ss;
+		// std::left << std::setw(40)
+		ss << std::hex << std::setfill('0')
+			<< "PC: 0x" << std::setw(4) << int(getPC()) << spacer
+			<< "A: 0x" << std::setw(2) << int(getRegA()) << spacer
+			<< "X: 0x" << std::setw(2) << int(getRegX()) << spacer
+			<< "Y: 0x" << std::setw(2) << int(getRegY()) << spacer
+			<< "S: 0x" << std::setw(2) << int(getRegS()) << spacer
+			<< "NVUBDIZC" << spacer
+			<< getFlag(N)
+			<< getFlag(U)
+			<< getFlag(B)
+			<< getFlag(D)
+			<< getFlag(I)
+			<< getFlag(Z)
+			<< getFlag(C) << spacer
+			<< "Cycles: " << std::dec << cycleCounter;
+
+		return ss.str();
 	}
-
-
 
 	// core functions
 	uint8_t fetchByte();

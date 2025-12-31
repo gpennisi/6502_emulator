@@ -32,26 +32,20 @@ public:
     }
 
     // to load a series of instructions 
-    bool loadProgram(const std::vector<uint8_t>& program, uint16_t startAddress, bool debug = false)
-    {
-        if ((uint32_t)startAddress + program.size() > RAM_SIZE)
+    bool loadProgram(const std::vector<uint8_t>& program, uint16_t startAddress)
+    {   
+        const size_t programSize = program.size();
+        if (uint32_t(startAddress + programSize) > RAM_SIZE)
         {
             std::cerr << "[Memory Error] Program does not fit in RAM!" << std::endl;
-            std::cerr << "Program End: " << (startAddress + program.size())
+            std::cerr << "Program End: " << (startAddress + programSize)
                 << " > RAM Size: " << RAM_SIZE << std::endl;
             return false;
         }
 
-        uint16_t current = startAddress;
-        for (uint8_t byte : program) {
-            // Usiamo 'this->write' così sfruttiamo il controllo bounds scritto sopra
-            write(byte, current++);
-
-            if (debug) {
-                // Stampa hex pulita
-                std::cout << "ADDR: " << std::hex << (current - 1)
-                    << " DATA: " << int(byte) << std::endl;
-            }
+        for (int i = 0; i < programSize; i++)
+        {
+            write(program[i], startAddress + i);
         }
         return true;
     }

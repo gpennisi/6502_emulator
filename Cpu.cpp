@@ -3,7 +3,6 @@
 #include "Cpu.h"
 #include "Bus.h"
 #include <stdexcept>
-#include <string>
 #include <iterator>
 
 
@@ -44,9 +43,10 @@ void Cpu::reset()
 	X = 0x0;
 	Y = 0x0;
 	// stack pointer addresses $0100-$01FF
-	S = 0xFF;
+	S = 0xFD;
 	SR = 0x24; 
 	isAccumulatorMode = false;
+	cycleCounter = 7;
 	// read the two 16-bit addresses that return
 	// the two bytes that point to the address in memory
 	// where the Program Counter starts from
@@ -59,12 +59,13 @@ void Cpu::reset()
 	PC = (high_byte << 8) | low_byte;
 
 }
-void Cpu::cycle(bool debug)
+void Cpu::cycle()
 {	
-	// fetch instruction
-	Instruction inst = lookup[fetchByte()];
-	if (debug) { std::cout << inst.inst << std::endl; }
-	// execute instruction
+	// fetch 
+	uint8_t opc = fetchByte();
+	// decode 
+	Instruction inst = lookup[opc];
+	// execute 
 	execInstruction(inst);
 }
 void Cpu::execInstruction(Instruction instruction)
@@ -76,6 +77,7 @@ void Cpu::execInstruction(Instruction instruction)
 	}
 	penalty = 0;
 	cycleCounter += instruction.cycles;
+
 	(this->*instruction.addr)();
 	(this->*instruction.opc)();
 	if (instruction.penalty) cycleCounter += penalty;
@@ -92,6 +94,93 @@ void Cpu::nmi()
 	interrupt(0xFFFA, false);
 	cycleCounter += 7;
 }
+
+std::string Cpu::disassembleInstruction(uint32_t addr)
+{
+	uint8_t value = bus.read(uint16_t(addr));
+	Instruction instruction = lookup[value];
+
+	std::stringstream ss;
+	ss << std::hex << std::uppercase << std::setfill('0');
+
+	// i.e. "$C000 : LDA "
+	ss << "$" << std::setw(4) << addr << " : " << "[$" << int(value) << "] "
+		<< instruction.inst << " ";
+
+
+	addr++; // next operand
+
+
+	auto addrMode = instruction.addr;
+
+	if (addrMode == &Cpu::imm)
+	{
+		uint8_t value = bus.read((uint16_t)addr);
+		ss << "#$" << std::setw(2) << (int)value;
+	}
+	else if (addrMode == &Cpu::zpg)
+	{
+		uint8_t lo = bus.read((uint16_t)addr);
+		ss << "$" << std::setw(2) << (int)lo;
+	}
+	else if (addrMode == &Cpu::zpgX)
+	{
+		uint8_t lo = bus.read((uint16_t)addr);
+		ss << "$" << std::setw(2) << (int)lo << ",X";
+	}
+	else if (addrMode == &Cpu::zpgY)
+	{
+		uint8_t lo = bus.read((uint16_t)addr);
+		ss << "$" << std::setw(2) << (int)lo << ",Y";
+	}
+	else if (addrMode == &Cpu::abs)
+	{
+		uint8_t lo = bus.read((uint16_t)addr); addr++;
+		uint8_t hi = bus.read((uint16_t)addr);
+		ss << "$" << std::setw(4) << ((hi << 8) | lo);
+	}
+	else if (addrMode == &Cpu::absX)
+	{
+		uint8_t lo = bus.read((uint16_t)addr); addr++;
+		uint8_t hi = bus.read((uint16_t)addr);
+		ss << "$" << std::setw(4) << ((hi << 8) | lo) << ",X";
+	}
+	else if (addrMode == &Cpu::absY)
+	{
+		uint8_t lo = bus.read((uint16_t)addr); addr++;
+		uint8_t hi = bus.read((uint16_t)addr);
+		ss << "$" << std::setw(4) << ((hi << 8) | lo) << ",Y";
+	}
+	else if (addrMode == &Cpu::ind)
+	{
+		uint8_t lo = bus.read((uint16_t)addr); addr++;
+		uint8_t hi = bus.read((uint16_t)addr);
+		ss << "($" << std::setw(4) << ((hi << 8) | lo) << ")";
+	}
+	else if (addrMode == &Cpu::Xind)
+	{
+		uint8_t lo = bus.read((uint16_t)addr);
+		ss << "($" << std::setw(2) << (int)lo << ",X)";
+	}
+	else if (addrMode == &Cpu::indY)
+	{
+		uint8_t lo = bus.read((uint16_t)addr);
+		ss << "($" << std::setw(2) << (int)lo << "),Y";
+	}
+	else if (addrMode == &Cpu::rel)
+	{
+		uint8_t value = bus.read((uint16_t)addr);
+		// Calculate the absolute address of the branch target
+		// addr + 1 (because PC would be at next instruction) + signed offset
+		uint16_t target = (uint16_t)(addr + 1 + (int8_t)value);
+		ss << "$" << std::setw(2) << (int)value << " [$" << std::setw(4) << target << "]";
+	}
+
+	// IMP and ACC modes require no extra printing
+
+	return ss.str();
+}
+
 
 // helper functions
 uint16_t Cpu::arithmetic(const uint16_t& value, std::function<uint16_t(uint16_t)> operation)
@@ -168,9 +257,14 @@ void Cpu::crossBound(const uint16_t& baseAddress, const uint16_t& finalAddress )
 };
 void Cpu::branch()
 {
-	crossBound(PC, currentAddress);
-	penalty ++ ;
-};
+	// branch taken: +1 cycle
+	penalty = 1;
+
+	// page boundary crossed: +1 additional cycle
+	if ((PC & 0xFF00) != (currentAddress & 0xFF00)) {
+		penalty++;
+	}
+}
 
 // Address Modes
 void Cpu::acc() { isAccumulatorMode = true; }
@@ -356,9 +450,8 @@ void Cpu::INY() { Y = (uint8_t)arithmetic(Y, [](uint16_t v) { return v + 1; }); 
 void Cpu::JMP() { PC = currentAddress; }
 void Cpu::JSR()
 {
-	uint16_t origPC = PC;
-	PC = bus.read(currentAddress);
-	pushWord(origPC - 1);
+	pushWord(PC - 1);
+	PC = currentAddress;
 }
 
 void Cpu::LDA() 
@@ -385,9 +478,10 @@ void Cpu::NOP() {}
 void Cpu::PHA() { push(A); }
 void Cpu::PHP() { push(SR | 0x20 | 0x10); }
 void Cpu::PLA() { load(A, pull()); }
-void Cpu::PLP() 
-{ 
-	SR = pull() | (SR & 0x20) | (SR & 0x10); 
+void Cpu::PLP()
+{
+	uint8_t pulled = pull();
+	SR = (pulled & 0xCF) | 0x20;  // Clear bit 4, set bit 5
 }
 
 void Cpu::ROL() {
@@ -526,7 +620,7 @@ void Cpu::RRA()
 	logic([value = value](uint8_t& A) { A &= value; });
 }
 
-void Cpu::SAX() { bus.write(currentAddress, A & X); }
+void Cpu::SAX() { bus.write(A & X, currentAddress); }
 void Cpu::SBX()
 {
 	uint8_t value = bus.read(currentAddress);
@@ -1002,7 +1096,7 @@ void Cpu::initInstructions()
 		indirect	JMP(oper)	6C	3		5 * **
 	*/
 	lookup[0x4C] = { "JMP",  &Cpu::abs,  &Cpu::JMP, 3, false };
-	lookup[0x6C] = { "JMP",  &Cpu::ind,  &Cpu::JMP, 5, false };
+	lookup[0x6C] = { "JMP",  &Cpu::ind,  &Cpu::JMP, 5, true };
 	/* -------------------------------------------------
 	JSR
 		Jump to New Location Saving Return Address

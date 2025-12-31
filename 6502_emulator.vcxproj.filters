@@ -29,7 +29,7 @@
     <ClCompile Include="Cpu.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="main.cpp">
+    <ClCompile Include="nestest.cpp">
       <Filter>Source Files\test</Filter>
     </ClCompile>
   </ItemGroup>

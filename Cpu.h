@@ -128,7 +128,7 @@ public:
 	void interrupt(uint16_t address, bool isSoftware);
 
 	// Penalty Functions
-	void crossBound(const uint16_t& baseAddress, const uint16_t& finalAddress); // <--- Semicolon
+	void crossBound(const uint16_t& baseAddress, const uint16_t& finalAddress);
 	void branch();
 
 	// --- Address Modes ---

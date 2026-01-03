@@ -485,13 +485,15 @@ void Cpu::PLP()
 }
 
 void Cpu::ROL() {
-	shift(0x80, [this](uint8_t v) {
-		return (v << 1) | (getFlag(C) ? 0x01 : 0x00);
+	bool oldCarry = getFlag(C);
+	shift(0x80, [oldCarry](uint8_t v) {
+		return (v << 1) | (oldCarry ? 0x01 : 0x00);
 		});
 }
 void Cpu::ROR() {
-	shift(0x01, [this](uint8_t v) {
-		return (v >> 1) | (getFlag(C) ? 0x80 : 0x00);
+	bool oldCarry = getFlag(C);
+	shift(0x01, [oldCarry](uint8_t v) {
+		return (v >> 1) | (oldCarry ? 0x80 : 0x00);
 		});
 }
 void Cpu::RTI() 
@@ -554,9 +556,15 @@ void Cpu::ANC()
 	AND();
 	updateFlag(C, A & 0x80);
 }
-void Cpu::ANE()
+void Cpu::ANE() 
 {
-	logic([value = X & bus.read(currentAddress)](uint8_t& A) { A &= value; });
+
+	uint8_t value = bus.read(currentAddress);
+
+	A = (A | 0xEE) & X & value;
+
+	updateFlag(N, A & 0x80);
+	updateFlag(Z, A == 0);
 }
 void Cpu::ARR()
 {
@@ -600,26 +608,41 @@ void Cpu::LAX()
 }
 void Cpu::LXA()
 {
-	logic([value = bus.read(currentAddress) ](uint8_t& A) { A &= value; });
+
+	uint8_t value = bus.read(currentAddress);
+
+	A = (A | 0xFF) & value;
 	X = A;
+
+	updateFlag(N, A & 0x80);
+	updateFlag(Z, A == 0);
 }
 
 void Cpu::RLA()
 {
-	uint8_t value = shift(0x80, [this](uint8_t v) {
-		return (v << 1) | (getFlag(C) ? 0x01 : 0x00);
-		});
-	logic( [value = value](uint8_t& A) { A &= value; } );
+	bool oldCarry = getFlag(C);
 
+	uint8_t value = shift(0x80, [oldCarry](uint8_t v) {
+		return (v << 1) | (oldCarry ? 0x01 : 0x00);
+		});
+
+	logic([value = value](uint8_t& A) { A &= value; });
 }
 void Cpu::RRA()
 {
-	uint8_t value = shift(0x01, [this](uint8_t v) {
-		return (v >> 1) | (getFlag(C) ? 0x80 : 0x00);
+	bool oldCarry = getFlag(C);
+	uint8_t value = shift(0x01, [oldCarry](uint8_t v) {
+		return (v >> 1) | (oldCarry ? 0x80 : 0x00);
 		});
-	logic([value = value](uint8_t& A) { A &= value; });
-}
 
+	uint16_t result = arithmetic(A, [value, C = getFlag(C)](uint16_t v) {
+		return uint16_t(v) + uint16_t(value) + uint16_t(C);
+		});
+
+	updateFlag(V, ((A ^ uint8_t(result)) & ~(A ^ value)) & 0x80);
+	updateFlag(C, result > 0xFF);
+	A = (uint8_t)result;
+}
 void Cpu::SAX() { bus.write(A & X, currentAddress); }
 void Cpu::SBX()
 {
@@ -633,8 +656,9 @@ void Cpu::SBX()
 }
 void Cpu::SHA()
 {
-	bus.write( 
-		A & X & (uint8_t(currentAddress >> 8) + 1),
+	uint8_t hh = (uint8_t)(currentAddress >> 8);
+	bus.write(
+		A & X & (hh + 1),
 		currentAddress
 	);
 }
@@ -659,13 +683,14 @@ void Cpu::SLO()
 }
 void Cpu::SRE()
 {
+	// LSR then EOR
 	uint8_t value = shift(0x01, [](uint8_t v) { return v >> 1; });
-	logic([value = value](uint8_t& A) { A |= value; });
+	logic([value = value](uint8_t& A) { A ^= value; }); 
 }
 
 void Cpu::TAS()
 {
-	push(A & X);
+	S = A & X;
 	SHA();
 }
 
@@ -1044,6 +1069,7 @@ void Cpu::initInstructions()
 	lookup[0x5D] = { "EOR",  &Cpu::absX, &Cpu::EOR, 4, true  };
 	lookup[0x59] = { "EOR",  &Cpu::absY, &Cpu::EOR, 4, true  };
 	lookup[0x41] = { "EOR",  &Cpu::Xind, &Cpu::EOR, 6, false };
+	lookup[0x51] = { "EOR",  &Cpu::Xind, &Cpu::EOR, 6, false };
 	/* -------------------------------------------------
 	INC
 		Increment Memory by One

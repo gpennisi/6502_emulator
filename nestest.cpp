@@ -56,17 +56,18 @@ int main(int argc, char* argv[])
     // nestest auto-mode starts at 0xC000.
     cpu.setPC(0xC000);
 
-    for (int step = 0; step < 26554; step++)
+
+    std::ofstream logFile(filePath+".log", std::ios::trunc);
+
+    for (int step = 0; step <= 8991; step++)
     {
-
 		std::string instructionStr = cpu.disassembleInstruction(cpu.getPC());
-
-        std::cout << std::left << std::setw(48) << instructionStr
+        logFile << std::left << std::setw(48) << instructionStr
             << cpu.cpuState() << std::endl;
-
 		cpu.cycle();
         
     }
+    logFile.close();
 
     return 0;
 }
